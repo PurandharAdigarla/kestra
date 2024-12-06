@@ -1,5 +1,7 @@
 package io.kestra.plugin.core.flow;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import io.kestra.core.exceptions.InternalException;
 import io.kestra.core.models.Label;
 import io.kestra.core.models.annotations.Example;
@@ -19,6 +21,9 @@ import io.kestra.core.runners.DefaultRunContext;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.SubflowExecution;
 import io.kestra.core.runners.SubflowExecutionResult;
+import io.kestra.core.serializers.ListOrMapOfLabelDeserializer;
+import io.kestra.core.serializers.ListOrMapOfLabelSerializer;
+import io.kestra.core.validations.NoSystemLabelValidation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Min;
 import lombok.experimental.SuperBuilder;
@@ -31,6 +36,7 @@ import lombok.ToString;
 
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import org.apache.commons.lang3.stream.Streams;
 
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -105,10 +111,13 @@ public class Subflow extends Task implements ExecutableTask<Subflow.Output>, Chi
     private Map<String, Object> inputs;
 
     @Schema(
-        title = "The labels to pass to the subflow to be executed."
+        title = "The labels to pass to the subflow to be executed.",
+        implementation = Object.class, oneOf = {List.class, Map.class}
     )
     @PluginProperty(dynamic = true)
-    private Map<String, String> labels;
+    @JsonSerialize(using = ListOrMapOfLabelSerializer.class)
+    @JsonDeserialize(using = ListOrMapOfLabelDeserializer.class)
+    private List<@NoSystemLabelValidation Label> labels;
 
     @Builder.Default
     @Schema(
@@ -161,17 +170,6 @@ public class Subflow extends Task implements ExecutableTask<Subflow.Output>, Chi
             inputs.putAll(runContext.render(this.inputs));
         }
 
-        List<Label> labels = new ArrayList<>();
-        if (this.inheritLabels && currentExecution.getLabels() != null && !currentExecution.getLabels().isEmpty()) {
-            labels.addAll(currentExecution.getLabels());
-        }
-
-        if (this.labels != null) {
-            for (Map.Entry<String, String> entry : this.labels.entrySet()) {
-                labels.add(new Label(entry.getKey(), runContext.render(entry.getValue())));
-            }
-        }
-
         return List.of(ExecutableUtils.subflowExecution(
             runContext,
             flowExecutorInterface,
@@ -181,6 +179,7 @@ public class Subflow extends Task implements ExecutableTask<Subflow.Output>, Chi
             currentTaskRun,
             inputs,
             labels,
+            inheritLabels,
             scheduleDate
         ));
     }

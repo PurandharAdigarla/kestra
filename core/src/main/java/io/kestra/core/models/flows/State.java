@@ -4,12 +4,12 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.micronaut.core.annotation.Introspected;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.time.DurationFormatUtils;
 
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotNull;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -182,6 +182,18 @@ public class State {
         return this.current.isPaused() || this.current.isRetrying() || this.current.isCreated();
     }
 
+    /**
+     * Checks whether the state is restarted after being paused.
+     *
+     * @return {@code true} if resuming. Otherwise {@code false}.
+     */
+    @JsonIgnore
+    public boolean isResumingAfterPause() {
+        if (!this.current.equals(Type.RESTARTED) || this.histories.size() < 2) {
+            return false;
+        }
+        return this.histories.get(this.histories.size() - 2).state.isPaused();
+    }
 
     @Introspected
     public enum Type {

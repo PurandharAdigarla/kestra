@@ -1,22 +1,52 @@
 <template>
     <div v-if="execution" class="execution-overview">
+        <div v-if="isFailed()">
+            <el-alert type="error" :closable="false" class="mb-4 main-error">
+                <template #title>
+                    <div @click="isExpanded = !isExpanded">
+                        <alert-outline class="main-icon" />
+                        {{ $t('execution failed header', errorLast ? 0 : 1, {message: errorLast?.message}) }}
+                        <span v-if="errorLast" v-html="$t('execution failed message', {message: errorLast?.message})" />
+                        <span class="toggle-icon" v-if="errorLogs">
+                            <menu-up v-if="isExpanded" />
+                            <menu-down v-else />
+                        </span>
+                    </div>
+                </template>
+                <div v-if="isExpanded && errorLogs" class="error-stack">
+                    <div v-for="log in errorLogs" :key="log" class="stack-line">
+                        <log-line :level="log.level" :log="log" :exclude-metas="['namespace', 'flowId', 'executionId']" />
+                    </div>
+                    <div class="text-end" v-if="errorLogsMore">
+                        <router-link :to="{name: 'executions/update', params: {tenantId: execution.tenantId, id: execution.id, namespace: execution.namespace, flowId: execution.flowId, tab: 'logs'}, query: {level: 'ERROR'}}">
+                            <el-button type="danger" class="mt-3">
+                                {{ $t('homeDashboard.errorLogs') }}
+                            </el-button>
+                        </router-link>
+                    </div>
+                </div>
+            </el-alert>
+        </div>
+
         <el-row class="mb-3">
             <el-col :span="12" class="crud-align">
                 <crud type="CREATE" permission="EXECUTION" :detail="{executionId: execution.id}" />
             </el-col>
-            <el-col :span="12" class="d-flex gap-2 justify-content-end">
+            <el-col :span="12" class="d-flex gap-2 justify-content-end actions-buttons">
                 <set-labels :execution="execution" />
-                <restart is-replay :execution="execution" class="ms-0" @follow="forwardEvent('follow', $event)" />
-                <restart :execution="execution" class="ms-0" @follow="forwardEvent('follow', $event)" />
+                <restart is-replay :execution="execution" @follow="forwardEvent('follow', $event)" />
+                <restart :execution="execution" @follow="forwardEvent('follow', $event)" />
                 <change-execution-status :execution="execution" @follow="forwardEvent('follow', $event)" />
                 <resume :execution="execution" />
                 <pause :execution="execution" />
-                <kill :execution="execution" class="ms-0" />
-                <status :status="execution.state.current" class="ms-0" />
+                <kill :execution="execution" />
+                <unqueue :execution="execution" />
+                <force-run :execution="execution" />
+                <status :status="execution.state.current" />
             </el-col>
         </el-row>
 
-        <el-table stripe table-layout="auto" fixed :data="items" :show-header="false" class="mb-0">
+        <el-table table-layout="auto" fixed :data="items" :show-header="false" class="mb-0">
             <el-table-column prop="key" :label="$t('key')" />
 
             <el-table-column prop="value" :label="$t('value')">
@@ -50,22 +80,38 @@
 
         <div v-if="execution.trigger" class="my-5">
             <h5>{{ $t("trigger") }}</h5>
-            <KestraCascader :options="transform({...execution.trigger, ...(execution.trigger.trigger ? execution.trigger.trigger : {})})" class="overflow-auto" />
+            <KestraCascader
+                :options="transform({...execution.trigger, ...(execution.trigger.trigger ? execution.trigger.trigger : {})})"
+                :execution
+                class="overflow-auto"
+            />
         </div>
 
         <div v-if="execution.inputs" class="my-5">
             <h5>{{ $t("inputs") }}</h5>
-            <KestraCascader :options="transform(execution.inputs)" class="overflow-auto" />
+            <KestraCascader
+                :options="transform(execution.inputs)"
+                :execution
+                class="overflow-auto"
+            />
         </div>
 
         <div v-if="execution.variables" class="my-5">
             <h5>{{ $t("variables") }}</h5>
-            <KestraCascader :options="transform(execution.variables)" class="overflow-auto" />
+            <KestraCascader
+                :options="transform(execution.variables)"
+                :execution
+                class="overflow-auto"
+            />
         </div>
 
         <div v-if="execution.outputs" class="my-5">
             <h5>{{ $t("outputs") }}</h5>
-            <KestraCascader :options="transform(execution.outputs)" class="overflow-auto" />
+            <KestraCascader
+                :options="transform(execution.outputs)"
+                :execution
+                class="overflow-auto"
+            />
         </div>
     </div>
 </template>
@@ -76,6 +122,8 @@
     import Restart from "./Restart.vue";
     import Resume from "./Resume.vue";
     import Pause from "./Pause.vue";
+    import Unqueue from "./Unqueue.vue";
+    import ForceRun from "./ForceRun.vue";
     import Kill from "./Kill.vue";
     import State from "../../utils/state";
     import DateAgo from "../layout/DateAgo.vue";
@@ -85,6 +133,10 @@
     import {toRaw} from "vue";
     import ChangeExecutionStatus from "./ChangeExecutionStatus.vue";
     import KestraCascader from "../../components/kestra/Cascader.vue"
+    import LogLine from "../../components/logs/LogLine.vue"
+    import AlertOutline from "vue-material-design-icons/AlertOutline.vue";
+    import MenuDown from "vue-material-design-icons/MenuDown.vue";
+    import MenuUp from "vue-material-design-icons/MenuUp.vue";
 
     export default {
         components: {
@@ -95,11 +147,17 @@
             Restart,
             Resume,
             Pause,
+            Unqueue,
+            ForceRun,
             Kill,
             DateAgo,
             Labels,
             Crud,
-            KestraCascader
+            KestraCascader,
+            LogLine,
+            AlertOutline,
+            MenuDown,
+            MenuUp
         },
         emits: ["follow"],
         methods: {
@@ -138,17 +196,62 @@
                 } else {
                     return this.execution.state.histories[this.execution.state.histories.length - 1].date;
                 }
+            },
+            isFailed() {
+                return this.execution.state.current === State.FAILED;
+            },
+            load() {
+                this.$store
+                    .dispatch(
+                        "execution/loadExecution",
+                        this.$route.params
+                    )
+                    .then(() => {
+                        this.fetchErrorLogs();
+                    })
+            },
+            fetchErrorLogs() {
+                this.$store
+                    .dispatch("execution/loadLogs", {
+                        store: false,
+                        executionId: this.execution.id,
+                        params: {
+                            minLevel: "ERROR"
+                        }
+                    })
+                    .then(response => {
+                        if (response && response.length >= 1) {
+                            this.errorLogsMore = response.length > 3;
+                            this.errorLast = response[response.length - 1];
+                            this.errorLogs = response.length > 3 ? response.slice(1).slice(-3) : response;
+
+                        } else {
+                            this.errorLogs = undefined;
+                            this.errorLogsMore = false;
+                            this.errorLast = undefined;
+                        }
+                    })
+            }
+        },
+        mounted() {
+            if (this.isFailed()) {
+                this.fetchErrorLogs();
             }
         },
         watch: {
             $route(newValue, oldValue) {
                 if (oldValue.name === newValue.name && this.execution.id !== this.$route.params.id) {
-                    this.$store.dispatch(
-                        "execution/loadExecution",
-                        this.$route.params
-                    );
+                    this.load();
                 }
             }
+        },
+        data() {
+            return {
+                isExpanded: false,
+                errorLogs: undefined,
+                errorLogsMore: false,
+                errorLast: undefined,
+            };
         },
         computed: {
             ...mapState("execution", ["flow", "execution"]),
@@ -294,6 +397,79 @@
                 color: var(--el-text-color-regular);
             }
         }
+    }
+
+    .actions-buttons {
+        .el-button {
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+        }
+    }
+}
+
+.el-alert.main-error {
+    background-color: transparent;
+    padding: 0.5rem;
+
+    .el-alert__title {
+        cursor: pointer;
+        font-weight: bold;
+        position: relative;
+        line-height: 2rem;
+        color: var(--bs-body-color);
+        font-size: var(--font-size-sm);
+
+        span {
+            font-weight: normal;
+        }
+
+        > div {
+            padding-right: 3rem;
+        }
+
+        .main-icon.material-design-icon  {
+            color: var(--el-color-danger);
+            font-size: 1.25rem;
+            position: relative;
+            top: 4px;
+            margin-right: 0.75rem;
+        }
+
+        .toggle-icon {
+            position: absolute;
+            color: var(--el-color-danger);
+            right: 1rem;
+            width: 1rem;
+            height: 1rem;
+            font-size: 1.75rem;
+            top: 10%;
+        }
+
+    }
+
+    .el-alert__description {
+        color: var(--bs-body-color);
+    }
+
+    .el-alert__content {
+        width: 100%;
+
+        .error-stack {
+            margin-top: 0.5rem;
+        }
+
+        .text-end {
+            border-top: 1px solid var(--bs-border-color);
+        }
+    }
+}
+
+.stack-line {
+    margin-bottom: 0;
+
+    .line {
+        padding: calc(var(--spacer) / 2);
+        border-top: 1px solid var(--bs-border-color);
     }
 }
 </style>

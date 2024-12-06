@@ -20,6 +20,7 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.commons.lang3.SystemUtils;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -67,7 +68,8 @@ public abstract class AbstractExecScript extends Task implements RunnableTask<Sc
 
     @Builder.Default
     @Schema(
-        title = "Whether to set the task state to `WARNING` if any `stdErr` is emitted."
+        title = "Whether to set the task state to `WARNING` when any `stdErr` output is detected.",
+        description = "Note that a script error will set the state to `FAILED` regardless."
     )
     @PluginProperty
     @NotNull
@@ -160,7 +162,7 @@ public abstract class AbstractExecScript extends Task implements RunnableTask<Sc
             .withInputFiles(this.getInputFiles())
             .withOutputFiles(this.getOutputFiles())
             .withEnableOutputDirectory(this.getOutputDirectory())
-            .withTimeout(this.getTimeout())
+            .withTimeout(runContext.render(this.getTimeout()).as(Duration.class).orElse(null))
             .withTargetOS(this.getTargetOS());
     }
 

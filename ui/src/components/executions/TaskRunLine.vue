@@ -43,8 +43,10 @@
             <status size="small" :status="selectedAttempt(currentTaskRun).state.current" />
         </div>
 
+        <slot name="buttons" />
+
         <el-select
-            class="d-none d-md-inline-block"
+            class="d-none d-md-inline-block attempt-select"
             :model-value="selectedAttemptNumberByTaskRunId[currentTaskRun.id]"
             @change="forwardEvent('swapDisplayedAttempt', {taskRunId: currentTaskRun.id, attemptNumber: $event})"
             :disabled="!currentTaskRun.attempts || currentTaskRun.attempts?.length <= 1"
@@ -58,7 +60,7 @@
         </el-select>
 
         <el-dropdown trigger="click">
-            <el-button type="default" class="more-dropdown-button">
+            <el-button type="default" class="task-run-buttons">
                 <DotsHorizontal title="" />
             </el-button>
             <template #dropdown>
@@ -123,18 +125,19 @@
             </template>
         </el-dropdown>
 
-        <el-button
-            v-if="!taskRunId && shouldDisplayChevron(currentTaskRun)"
-            class="border-0 expand-collapse"
-            type="default"
-            text
-            @click.stop="() => forwardEvent('toggleShowAttempt',(attemptUid(currentTaskRun.id, selectedAttemptNumberByTaskRunId[currentTaskRun.id])))"
-        >
-            <ChevronUp
-                v-if="shownAttemptsUid.includes(attemptUid(currentTaskRun.id, selectedAttemptNumberByTaskRunId[currentTaskRun.id]))"
-            />
-            <ChevronDown v-else />
-        </el-button>
+        <div>
+            <el-button
+                v-if="!taskRunId && shouldDisplayChevron(currentTaskRun)"
+                class="task-run-buttons"
+                type="default"
+                @click.stop="() => forwardEvent('toggleShowAttempt',(attemptUid(currentTaskRun.id, selectedAttemptNumberByTaskRunId[currentTaskRun.id])))"
+            >
+                <ChevronUp
+                    v-if="shownAttemptsUid.includes(attemptUid(currentTaskRun.id, selectedAttemptNumberByTaskRunId[currentTaskRun.id]))"
+                />
+                <ChevronDown v-else />
+            </el-button>
+        </div>
     </div>
 </template>
 <script>
@@ -366,7 +369,6 @@
         }
 
         small {
-            color: var(--bs-gray-600);
             font-family: var(--bs-font-monospace);
             font-size: var(--font-size-xs)
         }
@@ -377,18 +379,20 @@
             color: var(--bs-gray-800);
         }
 
-        .more-dropdown-button {
+        .task-run-buttons {
             padding: .5rem;
-            margin-bottom: .5rem;
+            height: 100%;
             border: 1px solid rgba($white, .05);
-
+            background-color: var(--bs-gray-400) !important;
             &:not(:hover) {
                 background: rgba($white, .10);
             }
         }
-
-        .expand-collapse {
-            background-color: transparent !important;
-        }
     }
+</style>
+
+<style lang="scss">
+.attempt-select > .el-select__wrapper {
+    height: 100%;
+}
 </style>

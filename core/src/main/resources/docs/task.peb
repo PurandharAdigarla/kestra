@@ -18,10 +18,15 @@ icon: {{ icon }}
 </h1>
 
 {% if deprecated %}
+    {%- if replacement -%}
+::alert{type="info"}
+🛈 This feature has been moved to a new location, please use `{{ replacement }}` instead.
+::
+    {%- else -%}
 ::alert{type="warning"}
 ⚠ This feature is deprecated and will be removed in the future. We encourage you to migrate to the new plugin, but you can still use the deprecated version.
-{% if replacement %}Please use `{{ replacement }}` instead. {%- endif %}
 ::
+    {%- endif -%}
 {%- endif %}
 
 {% if beta %}
@@ -74,7 +79,7 @@ type: "{{ cls }}"
 {% endif %}
 
 
-{% if outputs != null -%}
+{% if outputs != null and outputs|length > 0 -%}
 ## Outputs
     {%- for entry in outputs %}
 ### `{{ entry.key }}`
@@ -85,7 +90,7 @@ type: "{{ cls }}"
 {% endif %}
 
 
-{% if defs != null -%}
+{% if defs != null and defs|length > 0 -%}
 ## Definitions
     {%- for entry in defs %}
 ### `{{ entry.key }}`

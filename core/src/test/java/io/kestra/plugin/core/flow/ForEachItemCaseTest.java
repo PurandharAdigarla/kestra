@@ -1,5 +1,6 @@
 package io.kestra.plugin.core.flow;
 
+import io.kestra.core.models.Label;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.queues.QueueException;
@@ -28,6 +29,7 @@ import java.nio.file.Files;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -101,6 +103,9 @@ public class ForEachItemCaseTest {
         assertThat(triggered.get().getFlowId(), is("for-each-item-subflow"));
         assertThat((String) triggered.get().getInputs().get("items"), matchesRegex("kestra:///io/kestra/tests/for-each-item/executions/.*/tasks/each-split/.*\\.txt"));
         assertThat(triggered.get().getTaskRunList(), hasSize(1));
+        Optional<Label> correlationId = triggered.get().getLabels().stream().filter(label -> label.key().equals(Label.CORRELATION_ID)).findAny();
+        assertThat(correlationId.isPresent(), is(true));
+        assertThat(correlationId.get().value(), is(execution.getId()));
     }
 
     public void forEachItemEmptyItems() throws TimeoutException, URISyntaxException, IOException, QueueException {
@@ -184,7 +189,7 @@ public class ForEachItemCaseTest {
         Map<String, Object> inputs = Map.of("file", file.toString());
         Execution execution = runnerUtils.runOne(null, TEST_NAMESPACE, "for-each-item-failed", null,
             (flow, execution1) -> flowIO.readExecutionInputs(flow, execution1, inputs),
-            Duration.ofSeconds(30));
+            Duration.ofSeconds(60));
 
         // we should have triggered 26 subflows
         assertThat(countDownLatch.await(1, TimeUnit.MINUTES), is(true));
@@ -256,7 +261,7 @@ public class ForEachItemCaseTest {
         // asserts for subflow merged outputs
         Map<String, Object> mergeTaskOutputs = execution.getTaskRunList().get(3).getOutputs();
         assertThat(mergeTaskOutputs.get("subflowOutputs"), notNullValue());
-        InputStream stream = storageInterface.get(null, URI.create((String) mergeTaskOutputs.get("subflowOutputs")));
+        InputStream stream = storageInterface.get(null, execution.getNamespace(), URI.create((String) mergeTaskOutputs.get("subflowOutputs")));
 
         try (var br = new BufferedReader(new InputStreamReader(stream))) {
             // one line per sub-flows
@@ -271,6 +276,7 @@ public class ForEachItemCaseTest {
 
         return storageInterface.put(
             null,
+            null,
             new URI("/file/storage/file.txt"),
             new FileInputStream(tempFile)
         );
@@ -280,6 +286,7 @@ public class ForEachItemCaseTest {
         File tempFile = File.createTempFile("file", ".txt");
 
         return storageInterface.put(
+            null,
             null,
             new URI("/file/storage/file.txt"),
             new FileInputStream(tempFile)

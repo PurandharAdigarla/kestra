@@ -13,10 +13,13 @@ import io.kestra.core.models.tasks.ExecutableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.storages.Storage;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.stream.Streams;
 
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.*;
+
+import static io.kestra.core.utils.Rethrow.throwConsumer;
 
 @Slf4j
 public final class ExecutableUtils {
@@ -59,6 +62,7 @@ public final class ExecutableUtils {
         TaskRun currentTaskRun,
         Map<String, Object> inputs,
         List<Label> labels,
+        boolean inheritLabels,
         Property<ZonedDateTime> scheduleDate
     ) throws IllegalVariableEvaluationException {
         String subflowNamespace = runContext.render(currentTask.subflowId().namespace());
@@ -84,6 +88,11 @@ public final class ExecutableUtils {
             throw new IllegalStateException("Cannot execute an invalid flow: " + fwe.getException());
         }
 
+        List<Label> newLabels = inheritLabels ? new ArrayList<>(currentExecution.getLabels()) : new ArrayList<>(systemLabels(currentExecution));
+        if (labels != null) {
+            labels.forEach(throwConsumer(label -> newLabels.add(new Label(runContext.render(label.key()), runContext.render(label.value())))));
+        }
+
         Map<String, Object> variables = ImmutableMap.of(
             "executionId", currentExecution.getId(),
             "namespace", currentFlow.getNamespace(),
@@ -92,12 +101,12 @@ public final class ExecutableUtils {
         );
 
         FlowInputOutput flowInputOutput = ((DefaultRunContext)runContext).getApplicationContext().getBean(FlowInputOutput.class);
-        Instant scheduleOnDate = scheduleDate != null ? scheduleDate.as(runContext, ZonedDateTime.class).toInstant() : null;
+        Instant scheduleOnDate = runContext.render(scheduleDate).as(ZonedDateTime.class).map(date -> date.toInstant()).orElse(null);
         Execution execution = Execution
             .newExecution(
                 flow,
                 (f, e) -> flowInputOutput.readExecutionInputs(f, e, inputs),
-                labels,
+                newLabels,
                 Optional.empty())
             .withTrigger(ExecutionTrigger.builder()
                 .id(currentTask.getId())
@@ -111,6 +120,12 @@ public final class ExecutableUtils {
             .parentTaskRun(currentTaskRun.withState(State.Type.RUNNING))
             .execution(execution)
             .build();
+    }
+
+    private static List<Label> systemLabels(Execution execution) {
+        return Streams.of(execution.getLabels())
+            .filter(label -> label.key().startsWith(Label.SYSTEM_PREFIX))
+            .toList();
     }
 
     @SuppressWarnings("unchecked")

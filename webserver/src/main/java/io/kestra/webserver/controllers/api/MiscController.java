@@ -3,6 +3,7 @@ package io.kestra.webserver.controllers.api;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import io.kestra.core.models.collectors.Usage;
+import io.kestra.core.repositories.DashboardRepositoryInterface;
 import io.kestra.core.repositories.ExecutionRepositoryInterface;
 import io.kestra.core.repositories.TemplateRepositoryInterface;
 import io.kestra.core.services.CollectorService;
@@ -13,7 +14,10 @@ import io.kestra.core.utils.VersionProvider;
 import io.kestra.webserver.services.BasicAuthService;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.http.HttpResponse;
-import io.micronaut.http.annotation.*;
+import io.micronaut.http.annotation.Body;
+import io.micronaut.http.annotation.Controller;
+import io.micronaut.http.annotation.Get;
+import io.micronaut.http.annotation.Post;
 import io.micronaut.scheduling.TaskExecutors;
 import io.micronaut.scheduling.annotation.ExecuteOn;
 import io.swagger.v3.oas.annotations.Operation;
@@ -23,6 +27,7 @@ import lombok.experimental.SuperBuilder;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.ZonedDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Slf4j
@@ -30,6 +35,9 @@ import java.util.Optional;
 public class MiscController {
     @Inject
     VersionProvider versionProvider;
+
+    @Inject
+    DashboardRepositoryInterface dashboardRepository;
 
     @Inject
     ExecutionRepositoryInterface executionRepository;
@@ -69,6 +77,9 @@ public class MiscController {
     @io.micronaut.context.annotation.Value("${kestra.server.preview.max-rows:5000}")
     private Integer maxPreviewRows;
 
+    @io.micronaut.context.annotation.Value("${kestra.hidden-labels.prefixes:}")
+    private List<String> hiddenLabelsPrefixes;
+
 
     @Get("{/tenant}/configs")
     @ExecuteOn(TaskExecutors.IO)
@@ -80,6 +91,7 @@ public class MiscController {
             .version(versionProvider.getVersion())
             .commitId(versionProvider.getRevision())
             .commitDate(versionProvider.getDate())
+            .isCustomDashboardsEnabled(dashboardRepository.isEnabled())
             .isTaskRunEnabled(executionRepository.isTaskRunEnabled())
             .isAnonymousUsageEnabled(this.isAnonymousUsageEnabled)
             .isTemplateEnabled(templateRepository.isPresent())
@@ -88,7 +100,8 @@ public class MiscController {
                 .max(this.maxPreviewRows)
                 .build()
             ).isBasicAuthEnabled(basicAuthService.isEnabled())
-            .systemNamespace(namespaceUtils.getSystemFlowNamespace());
+            .systemNamespace(namespaceUtils.getSystemFlowNamespace())
+            .hiddenLabelsPrefixes(hiddenLabelsPrefixes);
 
         if (this.environmentName != null || this.environmentColor != null) {
             builder.environment(
@@ -133,6 +146,9 @@ public class MiscController {
         ZonedDateTime commitDate;
 
         @JsonInclude
+        Boolean isCustomDashboardsEnabled;
+
+        @JsonInclude
         Boolean isTaskRunEnabled;
 
         @JsonInclude
@@ -148,6 +164,8 @@ public class MiscController {
         Boolean isBasicAuthEnabled;
 
         String systemNamespace;
+
+        List<String> hiddenLabelsPrefixes;
     }
 
     @Value

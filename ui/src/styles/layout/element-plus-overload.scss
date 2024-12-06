@@ -9,6 +9,18 @@
         &:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--error):not(.el-button--info) {
             --el-button-hover-text-color: var(--bs-body-color);
         }
+
+             &:hover {
+                border-color: #8008f6 !important;
+                background-color: #404559 !important;
+                color: white !important;
+            }
+    }
+
+    &--default:hover {
+        border-color: #890fff !important;
+        background-color: #f5f5ff !important;
+        color:  black !important;
     }
 
     .el-input-group--append & [class*=el-icon] + span {
@@ -59,6 +71,15 @@
             height: 1.5rem;
         }
     }
+
+    &--success {
+        #{--el-button-bg-color}: $green-500;
+        #{--el-button-hover-bg-color}: $green-400;
+        html.dark & {
+            #{--el-button-bg-color}: $green-400;
+            #{--el-button-hover-bg-color}: $green-300;
+        }
+    }
 }
 
 .el-input-group__append, .el-input-group__prepend {
@@ -73,6 +94,8 @@
 }
 
 .el-input, .el-input-number, .el-select, .el-date-editor.el-input {
+
+    background-color: var(--bs-body-bg);
     width: 100%;
 }
 
@@ -206,7 +229,7 @@
     background: var(--bs-white);
 
     html.dark & {
-        background: var(--bs-gray-600);
+        background: var(--bs-card-bg);
     }
 }
 
@@ -217,11 +240,23 @@
 }
 
 .el-input-file {
+
     .el-input__inner::file-selector-button {
         background: var(--bs-primary);
         border: 0;
         margin: 2px 10px 0 4px;
         border-radius: var(--el-border-radius-base);
+    }
+}
+
+// form item error
+.el-form-item {
+    .el-form-item__error {
+        &.el-form-item__error--inline {
+            margin-top: 3px;
+            width: 100%;
+            margin-left: 6px;
+        }
     }
 }
 
@@ -270,12 +305,13 @@ form.ks-horizontal {
     --el-table-border: 1px solid var(--bs-border-color);
 
     --el-table-header-text-color: var(--bs-body-color);
-    --el-table-row-hover-bg-color: var(--bs-gray-100-darken-5);
-    --el-table-header-bg-color: var(--bs-gray-100-darken-3);
-    --el-table-tr-bg-color: var(--bs-body-bg);
+    --el-table-row-hover-bg-color: var(--bs-gray-200);
+    --el-table-header-bg-color: #f5f5ff;
+    --el-table-tr-bg-color: var(--bs-white);
 
     html.dark & {
         --el-table-tr-bg-color: var(--card-bg);
+        --el-table-header-bg-color: var(--input-bg);
     }
 
     outline: 1px solid var(--bs-border-color);
@@ -296,6 +332,7 @@ form.ks-horizontal {
     .cell {
         padding: 0 8px;
         word-break: break-word;
+        font-weight: 400;
     }
 
     .el-table__cell {
@@ -494,6 +531,46 @@ form.ks-horizontal {
             }
         }
     }
+
+    &.el-tabs--card{
+        .el-tabs__nav-wrap{
+            margin-bottom: 1px; // fix tabs overflowing over the bottom line
+        }
+        & > .el-tabs__header .el-tabs__nav{
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--el-border-color-light);
+            gap: 2px;
+            .el-tabs__item{
+                padding: 0 !important;
+                border: none;
+                &:first-child a{
+                    margin-left: 1px;
+                    border-top-left-radius: 3px;
+                }
+                &:last-child a{
+                    border-top-right-radius: 3px;
+                }
+                a{
+                    padding-top: 7px;
+                    padding-bottom: 7px;
+                    font-weight: normal!important;
+                    color: var(--el-text-color-regular);
+                    &:hover{
+                        background-color: var(--card-bg-hover);
+                    }
+                }
+                &.is-active a{
+                    box-shadow:
+                        0 0 0 1px var(--el-bg-color),
+                        0 0 0 2px var(--bs-primary);
+                    background-color: var(--el-bg-color);
+                    color: var(--token-content-link);
+                    position: relative;
+                    z-index: 1;
+                }
+            }
+        }
+    }
 }
 
 // card
@@ -656,7 +733,7 @@ form.ks-horizontal {
     }
 
     .el-input__prefix, .el-input__inner, .el-input__inner::placeholder {
-        color: var(--bs-body-color);
+        background-color: var(--bs-body-bg);
     }
 
     .el-input__suffix-inner {
@@ -813,7 +890,12 @@ form.ks-horizontal {
 
     @each $type in $types {
         &.el-alert--#{$type} {
-            border: 1px solid var(--el-color-#{$type}-light-5);
+            border: 1px solid var(--el-color-alert-#{$type});
+            color: var(--el-color-alert-#{$type});
+            @if $type == 'info' {
+                background-color: rgba(14, 59, 154, 0.2);
+                border-color: rgba(23, 97, 253, 1);
+            }
         }
     }
 }
@@ -862,6 +944,21 @@ form.ks-horizontal {
             --el-tag-hover-color: var(--el-color-#{$i}-dark-2);
         }
     }
+
+    &.el-tag--plain {
+        border: 1px solid var(--el-tag-border-color);
+        @each $i in ($types) {
+            &.el-tag--#{$i} {
+                --el-tag-text-color: var(--el-color-#{$i});
+                --el-tag-bg-color: #FFFFFF;
+                --el-tag-hover-color: var(--el-color-#{$i}-dark-2);
+                --el-tag-border-color: var(--el-color-#{$i});
+                html.dark &{
+                    --el-tag-bg-color: #{darken(map.get($element-colors, $i, 'base'), 45%)};
+                }
+            }
+        }
+    }
 }
 
 // avatar
@@ -882,16 +979,23 @@ form.ks-horizontal {
 // dialog
 .el-dialog {
     --el-dialog-border-radius: var(--bs-border-radius-lg);
+    background-color: var(--bs-card-bg);
 
     .el-dialog__header {
         padding: var(--spacer);
-        background-color: var(--bs-gray-300);
         margin: calc(var(--spacer) * -1) calc(var(--spacer) * -1) var(--spacer);
         border-top-right-radius: var(--bs-border-radius-lg);
         border-top-left-radius: var(--bs-border-radius-lg);
+        background: var(--bs-gray-300);
+        font-size: var(--font-size-lg);
 
         html.dark & {
-            background-color: var(--bs-gray-100);
+            background: var(--bs-gray-200);
+        }
+
+        .el-dialog__headerbtn {
+            height: 62px;
+            width: 62px;
         }
     }
 
@@ -903,6 +1007,10 @@ form.ks-horizontal {
 
     .el-dialog__headerbtn .el-dialog__close {
         color: var(--bs-primary);
+
+        html.dark & {
+            color: var(--bs-white)
+        }
     }
 
     .bottom-buttons {

@@ -4,31 +4,20 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.kestra.core.encryption.EncryptionService;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
-import io.kestra.core.exceptions.ResourceExpiredException;
 import io.kestra.core.models.executions.AbstractMetricEntry;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.storages.StateStore;
 import io.kestra.core.storages.Storage;
 import io.kestra.core.storages.kv.KVStore;
-import io.kestra.core.storages.kv.KVValue;
-import io.kestra.core.utils.FileUtils;
 import org.slf4j.Logger;
 
-import java.io.ByteArrayInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
-import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- *
- */
 public abstract class RunContext {
 
     /**
@@ -60,9 +49,7 @@ public abstract class RunContext {
 
     public abstract String render(String inline, Map<String, Object> variables) throws IllegalVariableEvaluationException;
 
-    public abstract <T> T render(Property<T> inline, Class<T> clazz) throws IllegalVariableEvaluationException;
-
-    public abstract <T> T  render(Property<T> inline, Class<T> clazz, Map<String, Object> variables) throws IllegalVariableEvaluationException;
+    public abstract <T> RunContextProperty<T> render(Property<T> inline);
 
     public abstract List<String> render(List<String> inline) throws IllegalVariableEvaluationException;
 
@@ -134,6 +121,10 @@ public abstract class RunContext {
      */
     public abstract void cleanup();
 
+    /**
+     * @deprecated use flowInfo().tenantId() instead
+     */
+    @Deprecated(forRemoval = true)
     public abstract String tenantId();
 
     public abstract FlowInfo flowInfo();
@@ -176,4 +167,6 @@ public abstract class RunContext {
 
     public record FlowInfo(String tenantId, String namespace, String id, Integer revision) {
     }
+
+    public abstract boolean isInitialized();
 }

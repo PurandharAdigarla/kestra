@@ -29,7 +29,7 @@
                         </el-select>
                     </el-form-item>
                     <el-form-item>
-                        <refresh-button class="float-right" @refresh="load(onDataLoaded)" />
+                        <refresh-button @refresh="load(onDataLoaded)" />
                     </el-form-item>
                 </template>
                 <template #table>
@@ -37,7 +37,6 @@
                         :data="triggersMerged"
                         ref="selectTable"
                         :default-sort="{prop: 'flowId', order: 'ascending'}"
-                        stripe
                         table-layout="auto"
                         fixed
                         @sort-change="onSort"
@@ -80,12 +79,20 @@
                             </bulk-select>
                         </template>
                         <el-table-column
+                            v-if="visibleColumns.triggerId"
                             prop="triggerId"
                             sortable="custom"
                             :sort-orders="['ascending', 'descending']"
                             :label="$t('id')"
-                        />
+                        >
+                            <template #default="scope">
+                                <div class="text-nowrap">
+                                    {{ scope.row.id }}
+                                </div>
+                            </template>
+                        </el-table-column>
                         <el-table-column
+                            v-if="visibleColumns.flowId"
                             prop="flowId"
                             sortable="custom"
                             :sort-orders="['ascending', 'descending']"
@@ -105,6 +112,7 @@
                             </template>
                         </el-table-column>
                         <el-table-column
+                            v-if="visibleColumns.namespace"
                             prop="namespace"
                             sortable="custom"
                             :sort-orders="['ascending', 'descending']"
@@ -115,7 +123,7 @@
                             </template>
                         </el-table-column>
 
-                        <el-table-column :label="$t('current execution')">
+                        <el-table-column v-if="visibleColumns.executionId" :label="$t('current execution')">
                             <template #default="scope">
                                 <router-link
                                     v-if="scope.row.executionId"
@@ -125,17 +133,7 @@
                                 </router-link>
                             </template>
                         </el-table-column>
-
-                        <el-table-column :label="$t('state')">
-                            <template #default="scope">
-                                <status
-                                    v-if="scope.row.executionCurrentState"
-                                    :status="scope.row.executionCurrentState"
-                                    size="small"
-                                />
-                            </template>
-                        </el-table-column>
-                        <el-table-column prop="workerId" :label="$t('workerId')">
+                        <el-table-column v-if="visibleColumns.workerId" prop="workerId" :label="$t('workerId')">
                             <template #default="scope">
                                 <id
                                     :value="scope.row.workerId"
@@ -143,22 +141,41 @@
                                 />
                             </template>
                         </el-table-column>
-                        <el-table-column :label="$t('date')">
+                        <el-table-column v-if="visibleColumns.date" :label="$t('date')">
                             <template #default="scope">
                                 <date-ago :inverted="true" :date="scope.row.date" />
                             </template>
                         </el-table-column>
-                        <el-table-column :label="$t('updated date')">
+                        <el-table-column v-if="visibleColumns.updatedDate" :label="$t('updated date')">
                             <template #default="scope">
                                 <date-ago :inverted="true" :date="scope.row.updatedDate" />
                             </template>
                         </el-table-column>
-                        <el-table-column :label="$t('next execution date')">
+                        <el-table-column
+                            v-if="visibleColumns.nextExecutionDate"
+                            prop="nextExecutionDate"
+                            sortable="custom"
+                            :sort-orders="['ascending', 'descending']"
+                            :label="$t('next execution date')"
+                        >
                             <template #default="scope">
                                 <date-ago :inverted="true" :date="scope.row.nextExecutionDate" />
                             </template>
                         </el-table-column>
-                        <el-table-column :label="$t('evaluation lock date')">
+                        <el-table-column :label="$t('cron')">
+                            <template #default="scope">
+                                <Cron v-if="scope.row.cron" :cron-expression="scope.row?.cron" />
+                            </template>
+                        </el-table-column>
+                        <el-table-column :label="$t('details')">
+                            <template #default="scope">
+                                <TriggerAvatar
+                                    :flow="{flowId: scope.row.flowId, namespace: scope.row.namespace, triggers: [scope.row]}"
+                                    :trigger-id="scope.row.id"
+                                />
+                            </template>
+                        </el-table-column>
+                        <el-table-column v-if="visibleColumns.evaluateRunningDate" :label="$t('evaluation lock date')">
                             <template #default="scope">
                                 <date-ago :inverted="true" :date="scope.row.evaluateRunningDate" />
                             </template>
@@ -169,7 +186,7 @@
                             class-name="row-action"
                         >
                             <template #default="scope">
-                                <el-button size="small" v-if="scope.row.executionId || scope.row.evaluateRunningDate">
+                                <el-button v-if="scope.row.executionId || scope.row.evaluateRunningDate">
                                     <kicon
                                         :tooltip="$t(`unlock trigger.tooltip.${scope.row.executionId ? 'execution' : 'evaluation'}`)"
                                         placement="left"
@@ -186,7 +203,7 @@
                             class-name="row-action"
                         >
                             <template #default="scope">
-                                <el-button size="small" v-if=" scope.row.evaluateRunningDate">
+                                <el-button>
                                     <kicon
                                         :tooltip="$t(`restart trigger.tooltip`)"
                                         placement="left"
@@ -215,7 +232,6 @@
                             <template #default="scope">
                                 <el-switch
                                     v-if="!scope.row.missingSource"
-                                    size="small"
                                     :active-text="$t('enabled')"
                                     :model-value="!scope.row.disabled"
                                     @change="setDisabled(scope.row, $event)"
@@ -258,6 +274,8 @@
     import SelectTable from "../layout/SelectTable.vue";
     import BulkSelect from "../layout/BulkSelect.vue";
     import Restart from "vue-material-design-icons/Restart.vue";
+    import Cron from "../layout/Cron.vue"
+    import TriggerAvatar from "../flows/TriggerAvatar.vue"
 </script>
 <script>
     import NamespaceSelect from "../namespace/NamespaceSelect.vue";
@@ -270,7 +288,6 @@
     import RefreshButton from "../layout/RefreshButton.vue";
     import DateAgo from "../layout/DateAgo.vue";
     import Id from "../Id.vue";
-    import Status from "../Status.vue";
     import {mapState} from "vuex";
     import SelectTableActions from "../../mixins/selectTableActions";
     import _merge from "lodash/merge";
@@ -285,7 +302,6 @@
             SearchField,
             NamespaceSelect,
             DateAgo,
-            Status,
             Id,
             LogsWrapper
         },
@@ -475,6 +491,25 @@
 
                 const disabled = this.state === "DISABLED" ? true : false;
                 return all.filter(trigger => trigger.disabled === disabled);
+            },
+            visibleColumns() {
+                const columns = [
+                    {prop: "triggerId", label: this.$t("id")},
+                    {prop: "flowId", label: this.$t("flow")},
+                    {prop: "namespace", label: this.$t("namespace")},
+                    {prop: "executionId", label: this.$t("current execution")},
+                    {prop: "executionCurrentState", label: this.$t("state")},
+                    {prop: "workerId", label: this.$t("workerId")},
+                    {prop: "date", label: this.$t("date")},
+                    {prop: "updatedDate", label: this.$t("updated date")},
+                    {prop: "nextExecutionDate", label: this.$t("next execution date")},
+                    {prop: "evaluateRunningDate", label: this.$t("evaluation lock date")},
+                ];
+
+                return columns.reduce((acc, column) => {
+                    acc[column.prop] = this.triggersMerged.some(trigger => trigger[column.prop]);
+                    return acc;
+                }, {});
             }
         }
     };
