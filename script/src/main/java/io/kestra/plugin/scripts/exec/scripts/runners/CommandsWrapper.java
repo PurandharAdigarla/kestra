@@ -1,34 +1,33 @@
 package io.kestra.plugin.scripts.exec.scripts.runners;
 
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.*;
+
+import org.apache.commons.lang3.SystemUtils;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
-import io.kestra.core.models.tasks.RunnableTaskException;
-import io.kestra.core.models.tasks.runners.DefaultLogConsumer;
-import io.kestra.core.models.tasks.runners.*;
-import io.kestra.core.runners.DefaultRunContext;
-import io.kestra.core.runners.RunContextInitializer;
-import io.kestra.core.storages.NamespaceFile;
-import io.kestra.core.utils.Rethrow;
-import io.kestra.plugin.core.runner.Process;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.NamespaceFiles;
+import io.kestra.core.models.tasks.RunnableTaskException;
+import io.kestra.core.models.tasks.runners.*;
+import io.kestra.core.models.tasks.runners.DefaultLogConsumer;
 import io.kestra.core.runners.FilesService;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.core.utils.NamespaceFilesUtils;
+import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
-import io.kestra.plugin.scripts.runner.docker.Docker;
+
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.With;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.nio.file.Path;
-import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import static io.kestra.core.utils.Rethrow.throwFunction;
 
 @AllArgsConstructor
 @Getter
@@ -42,7 +41,19 @@ public class CommandsWrapper implements TaskCommands {
     private Map<String, Object> additionalVars;
 
     @With
-    private List<String> commands;
+    private Property<List<String>> interpreter;
+
+    @With
+    private Property<List<String>> beforeCommands;
+
+    @With
+    private Property<List<String>> commands;
+
+    @With
+    private boolean beforeCommandsWithOptions;
+
+    @With
+    private boolean failFast;
 
     private Map<String, String> env;
 
@@ -50,20 +61,22 @@ public class CommandsWrapper implements TaskCommands {
     private io.kestra.core.models.tasks.runners.AbstractLogConsumer logConsumer;
 
     @With
+    @Deprecated
     private RunnerType runnerType;
 
     @With
     private String containerImage;
 
     @With
-    private TaskRunner taskRunner;
+    private TaskRunner<?> taskRunner;
 
     @With
+    @Deprecated
     private DockerOptions dockerOptions;
 
     @With
+    @Deprecated
     private Boolean warningOnStdErr;
-
     @With
     private NamespaceFiles namespaceFiles;
 
@@ -96,7 +109,11 @@ public class CommandsWrapper implements TaskCommands {
             workingDirectory,
             getOutputDirectory(),
             additionalVars,
+            interpreter,
+            beforeCommands,
             commands,
+            beforeCommandsWithOptions,
+            failFast,
             envs,
             logConsumer,
             runnerType,
@@ -131,40 +148,75 @@ public class CommandsWrapper implements TaskCommands {
         return this;
     }
 
-    public ScriptOutput run() throws Exception {
-        if (this.namespaceFiles != null && !Boolean.FALSE.equals(this.namespaceFiles.getEnabled())) {
-
-            List<NamespaceFile> matchedNamespaceFiles = runContext.storage()
-                .namespace()
-                .findAllFilesMatching(this.namespaceFiles.getInclude(), this.namespaceFiles.getExclude());
-
-            matchedNamespaceFiles.forEach(Rethrow.throwConsumer(namespaceFile -> {
-                    InputStream content = runContext.storage().getFile(namespaceFile.uri());
-                    runContext.workingDir().createFile(namespaceFile.path().toString(), content);
-                }));
+    public <T extends TaskRunnerDetailResult> ScriptOutput run() throws Exception {
+        if (this.namespaceFiles != null && !Boolean.FALSE.equals(runContext.render(this.namespaceFiles.getEnabled()).as(Boolean.class).orElse(true))) {
+            NamespaceFilesUtils.loadNamespaceFiles(runContext, this.namespaceFiles);
         }
 
-        TaskRunner realTaskRunner = this.getTaskRunner();
+        // Inject non-glob outputFiles into the Pebble render context as a name→path map before any rendering.
+        // This makes {{ outputFiles["name"] }} resolvable in scripts, consistent with JDBC tasks.
+        // Glob patterns are skipped here — they cannot resolve to a single path; post-run collection still handles them.
+        Map<String, Object> runnerVars = taskRunner.additionalVars(runContext, this);
+        if (this.outputFiles != null && !this.outputFiles.isEmpty()) {
+            String workingDir = String.valueOf(runnerVars.getOrDefault(ScriptService.VAR_WORKING_DIR, this.workingDirectory));
+            Map<String, String> outputFilesMap = new LinkedHashMap<>();
+            for (String name : this.outputFiles) {
+                if (!name.contains("*") && !name.contains("?") && !name.contains("[")) {
+                    outputFilesMap.put(name, workingDir + "/" + name);
+                }
+            }
+            if (!outputFilesMap.isEmpty()) {
+                runnerVars.put("outputFiles", outputFilesMap);
+            }
+        }
+
         if (this.inputFiles != null) {
-            FilesService.inputFiles(runContext, realTaskRunner.additionalVars(runContext, this), this.inputFiles);
+            FilesService.inputFiles(runContext, runnerVars, this.inputFiles);
         }
 
-        RunContextInitializer initializer = ((DefaultRunContext) runContext).getApplicationContext().getBean(RunContextInitializer.class);
+        RunContext taskRunnerRunContext = runContext.cloneForPlugin(taskRunner);
 
-        RunContext taskRunnerRunContext = initializer.forPlugin(((DefaultRunContext) runContext).clone(), realTaskRunner);
-        this.commands = this.render(runContext, commands);
+        List<String> renderedCommands = this.renderCommands(runContext, commands);
+        List<String> renderedBeforeCommands = this.renderCommands(runContext, beforeCommands);
+        List<String> renderedInterpreter = this.renderCommands(runContext, interpreter);
 
-        var outputBuilder = ScriptOutput.builder().warningOnStdErr(this.warningOnStdErr);
+        List<String> effectiveBeforeCommands = this.isBeforeCommandsWithOptions() ? getBeforeCommandsWithOptions(renderedBeforeCommands) : renderedBeforeCommands;
+        if (!renderedBeforeCommands.isEmpty()) {
+            List<String> marked = new ArrayList<>();
+            marked.add("echo '##kestra:log:debug##'");
+            marked.addAll(effectiveBeforeCommands);
+            marked.add("echo '##kestra:log:info##'");
+            effectiveBeforeCommands = marked;
+        }
+
+        List<String> finalCommands = renderedBeforeCommands.isEmpty() && renderedInterpreter.isEmpty() ? renderedCommands
+            : ScriptService.scriptCommands(
+                renderedInterpreter,
+                effectiveBeforeCommands,
+                renderedCommands,
+                Optional.ofNullable(targetOS).orElse(TargetOS.AUTO)
+            );
+
+        this.commands = Property.ofValue(finalCommands);
+
+        ScriptOutput.ScriptOutputBuilder scriptOutputBuilder = ScriptOutput.builder();
+
         try {
-            RunnerResult runnerResult = realTaskRunner.run(taskRunnerRunContext, this, this.outputFiles);
-            return outputBuilder.exitCode(runnerResult.getExitCode())
-                .stdOutLineCount(runnerResult.getLogConsumer().getStdOutCount())
-                .stdErrLineCount(runnerResult.getLogConsumer().getStdErrCount())
-                .vars(runnerResult.getLogConsumer().getOutputs())
+            TaskRunnerResult<T> taskRunnerResult = (TaskRunnerResult<T>) taskRunner.run(taskRunnerRunContext, this, this.outputFiles);
+            scriptOutputBuilder.exitCode(taskRunnerResult.getExitCode())
                 .outputFiles(getOutputFiles(taskRunnerRunContext))
-                .build();
+                .taskRunner(taskRunnerResult.getDetails());
+
+            if (taskRunnerResult.getLogConsumer() != null) {
+                scriptOutputBuilder
+                    .stdOutLineCount(taskRunnerResult.getLogConsumer().getStdOutCount())
+                    .stdErrLineCount(taskRunnerResult.getLogConsumer().getStdErrCount())
+                    .vars(taskRunnerResult.getLogConsumer().getOutputs());
+            }
+
+            return scriptOutputBuilder.build();
         } catch (TaskException e) {
-            var output = outputBuilder.exitCode(e.getExitCode())
+            var output = scriptOutputBuilder.exitCode(e.getExitCode())
                 .stdOutLineCount(e.getStdOutCount())
                 .stdErrLineCount(e.getStdErrCount())
                 .vars(e.getLogConsumer() != null ? e.getLogConsumer().getOutputs() : null)
@@ -186,31 +238,6 @@ public class CommandsWrapper implements TaskCommands {
         return outputFiles;
     }
 
-    public TaskRunner getTaskRunner() {
-        if (runnerType != null) {
-            return switch (runnerType) {
-                case DOCKER -> Docker.from(dockerOptions);
-                case PROCESS -> new Process();
-            };
-        }
-
-        // special case to take into account the deprecated dockerOptions if set
-        if (taskRunner instanceof Docker && dockerOptions != null) {
-            return Docker.from(dockerOptions);
-        }
-
-        return taskRunner;
-    }
-
-    public Boolean getEnableOutputDirectory() {
-        if (this.enableOutputDirectory == null) {
-            // For compatibility reasons, if legacy runnerType property is used, we enable the output directory
-            return this.runnerType != null;
-        }
-
-        return this.enableOutputDirectory;
-    }
-
     public Path getOutputDirectory() {
         if (this.outputDirectory == null) {
             this.outputDirectory = this.workingDirectory.resolve(IdUtils.create());
@@ -223,7 +250,7 @@ public class CommandsWrapper implements TaskCommands {
     }
 
     public String render(RunContext runContext, String command, List<String> internalStorageLocalFiles) throws IllegalVariableEvaluationException, IOException {
-        TaskRunner taskRunner = this.getTaskRunner();
+        TaskRunner<?> taskRunner = this.getTaskRunner();
         return ScriptService.replaceInternalStorage(
             this.runContext,
             taskRunner.additionalVars(runContext, this),
@@ -232,13 +259,67 @@ public class CommandsWrapper implements TaskCommands {
         );
     }
 
-    public List<String> render(RunContext runContext, List<String> commands) throws IllegalVariableEvaluationException, IOException {
-        TaskRunner taskRunner = this.getTaskRunner();
+    public String render(RunContext runContext, Property<String> command) throws IllegalVariableEvaluationException, IOException {
+        TaskRunner<?> taskRunner = this.getTaskRunner();
+        if (command == null) {
+            return null;
+        }
+
+        Map<String, Object> additionalVars = taskRunner.additionalVars(runContext, this);
+        if (this.outputFiles != null && !this.outputFiles.isEmpty()) {
+            String workingDir = String.valueOf(additionalVars.getOrDefault(ScriptService.VAR_WORKING_DIR, this.workingDirectory));
+            Map<String, String> outputFilesMap = new LinkedHashMap<>();
+            for (String name : this.outputFiles) {
+                if (!name.contains("*") && !name.contains("?") && !name.contains("[")) {
+                    outputFilesMap.put(name, workingDir + "/" + name);
+                }
+            }
+            if (!outputFilesMap.isEmpty()) {
+                additionalVars.put("outputFiles", outputFilesMap);
+            }
+        }
+
+        return runContext.render(command).as(String.class, additionalVars)
+            .map(throwFunction(c -> ScriptService.replaceInternalStorage(runContext, c, taskRunner instanceof RemoteRunnerInterface)))
+            .orElse(null);
+    }
+
+    public List<String> renderCommands(RunContext runContext, Property<List<String>> commands) throws IllegalVariableEvaluationException, IOException {
+        TaskRunner<?> taskRunner = this.getTaskRunner();
         return ScriptService.replaceInternalStorage(
             this.runContext,
             taskRunner.additionalVars(runContext, this),
             commands,
             taskRunner instanceof RemoteRunnerInterface
         );
+    }
+
+    protected List<String> getBeforeCommandsWithOptions(List<String> beforeCommands) throws IllegalVariableEvaluationException {
+        if (!this.isFailFast()) {
+            return beforeCommands;
+        }
+
+        if (beforeCommands == null || beforeCommands.isEmpty()) {
+            return getExitOnErrorCommands();
+        }
+
+        ArrayList<String> newCommands = new ArrayList<>(beforeCommands.size() + 1);
+        newCommands.addAll(getExitOnErrorCommands());
+        newCommands.addAll(beforeCommands);
+        return newCommands;
+    }
+
+    protected List<String> getExitOnErrorCommands() {
+        TargetOS os = this.getTargetOS();
+
+        // If targetOS is Windows OR targetOS is AUTO && current system is windows and we use process as a runner.(TLDR will run on windows)
+        if (
+            os == TargetOS.WINDOWS ||
+                (os == TargetOS.AUTO && SystemUtils.IS_OS_WINDOWS && this.getTaskRunner() instanceof Process)
+        ) {
+            return List.of("");
+        }
+        // errexit option may be unsupported by non-shell interpreter.
+        return List.of("set -e");
     }
 }

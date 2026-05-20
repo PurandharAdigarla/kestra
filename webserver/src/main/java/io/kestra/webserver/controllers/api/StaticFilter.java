@@ -1,7 +1,19 @@
 package io.kestra.webserver.controllers.api;
 
-import com.google.common.base.Charsets;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Stream;
+
+import org.apache.commons.io.IOUtils;
+import org.reactivestreams.Publisher;
+
+import io.kestra.webserver.configuration.WebserverConfiguration;
+
 import io.micronaut.context.annotation.Value;
+import io.micronaut.core.annotation.Nullable;
+import jakarta.inject.Inject;
 import io.micronaut.core.async.publisher.Publishers;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
@@ -12,17 +24,6 @@ import io.micronaut.http.filter.HttpServerFilter;
 import io.micronaut.http.filter.ServerFilterChain;
 import io.micronaut.http.server.types.files.StreamedFile;
 import io.micronaut.http.server.types.files.SystemFile;
-import org.apache.commons.io.IOUtils;
-import org.reactivestreams.Publisher;
-
-import java.io.IOException;
-
-import java.nio.charset.StandardCharsets;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.stream.Stream;
-
-import io.micronaut.core.annotation.Nullable;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
 
@@ -32,18 +33,14 @@ public class StaticFilter implements HttpServerFilter {
     @Value("${micronaut.server.context-path}")
     protected String basePath;
 
-    @Nullable
-    @Value("${kestra.webserver.google-analytics}")
-    protected String googleAnalytics;
-
-    @Nullable
-    @Value("${kestra.webserver.html-head}")
-    protected String htmlHead;
+    @Inject
+    protected WebserverConfiguration webserverConfiguration;
 
     @Override
     public Publisher<MutableHttpResponse<?>> doFilter(HttpRequest<?> request, ServerFilterChain chain) {
         return Publishers
-            .map(chain.proceed(request), (MutableHttpResponse<?> response) -> {
+            .map(chain.proceed(request), (MutableHttpResponse<?> response) ->
+            {
                 try {
                     Optional<? extends MutableHttpResponse<?>> alteredResponse = Stream
                         .of(
@@ -54,14 +51,19 @@ public class StaticFilter implements HttpServerFilter {
                             // debug mode
                             response.getBody(SystemFile.class)
                                 .filter(n -> n.getFile().getAbsoluteFile().toString().endsWith("ui/index.html"))
-                                .map(throwFunction(n -> IOUtils.toString(
-                                    Objects.requireNonNull(StaticFilter.class.getClassLoader().getResourceAsStream("ui/index.html")),
-                                    Charsets.UTF_8
-                                )))
+                                .map(
+                                    throwFunction(
+                                        n -> IOUtils.toString(
+                                            Objects.requireNonNull(StaticFilter.class.getClassLoader().getResourceAsStream("ui/index.html")),
+                                            StandardCharsets.UTF_8
+                                        )
+                                    )
+                                )
                         )
                         .filter(Optional::isPresent)
                         .map(Optional::get)
-                        .map(s -> {
+                        .map(s ->
+                        {
                             String finalBody = replace(s);
 
                             return (MutableHttpResponse<?>) HttpResponse
@@ -86,11 +88,15 @@ public class StaticFilter implements HttpServerFilter {
 
         line = line.replace("./", (basePath != null ? basePath : "") + "/ui/");
 
-        if (googleAnalytics != null) {
-            line = line.replace("KESTRA_GOOGLE_ANALYTICS = null;", "KESTRA_GOOGLE_ANALYTICS = '" + this.googleAnalytics + "';");
+        if (webserverConfiguration.googleAnalytics() != null) {
+            line = line.replace("KESTRA_GOOGLE_ANALYTICS = null;", "KESTRA_GOOGLE_ANALYTICS = '" + webserverConfiguration.googleAnalytics() + "';");
         }
 
-        line = line.replace("<meta name=\"html-head\" content=\"replace\">", this.htmlHead == null ? "" : this.htmlHead);
+        if (webserverConfiguration.htmlTitle() != null) {
+            line = line.replaceFirst("<title>(.*)</title>", "<title>" + webserverConfiguration.htmlTitle() + "</title>");
+        }
+
+        line = line.replace("<meta name=\"html-head\" content=\"replace\">", webserverConfiguration.htmlHead() == null ? "" : webserverConfiguration.htmlHead());
 
         return line;
     }

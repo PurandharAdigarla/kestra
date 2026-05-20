@@ -1,20 +1,5 @@
 package io.kestra.plugin.core.storage;
 
-import io.kestra.core.models.annotations.Example;
-import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
-import io.kestra.core.models.tasks.RunnableTask;
-import io.kestra.core.models.tasks.Task;
-import io.kestra.core.runners.RunContext;
-import io.kestra.core.utils.FileUtils;
-import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.NotNull;
-import lombok.*;
-import lombok.experimental.SuperBuilder;
-import org.apache.commons.io.Charsets;
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.io.input.ReversedLinesFileReader;
-
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -23,52 +8,87 @@ import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
+import org.apache.commons.io.Charsets;
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.io.input.ReversedLinesFileReader;
+
+import io.kestra.core.models.annotations.Example;
+import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.Task;
+import io.kestra.core.runners.RunContext;
+import io.kestra.core.utils.FileUtils;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
+
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Reserve a file from the Kestra's internal storage, last line first."
+    title = "Reverse a file (last line first) in Kestra internal storage.",
+    description = """
+        Copies the source file locally, writes lines in reverse order with a configurable separator, and uploads the result. Charset defaults to UTF-8.
+
+        Handy for log-like files where newest-first order is desired."""
 )
 @Plugin(
     examples = {
         @Example(
-            code = {
-                "from: \"kestra://long/url/file1.txt\"",
-            }
+            title = "",
+            full = true,
+            code = """
+                    id: reverse_file
+                    namespace: company.team
+
+                    tasks:
+                      - id: generate_file
+                        type: io.kestra.plugin.scripts.shell.Commands
+                        commands:
+                          - echo "1\n2\n3" > numbers.txt
+                        outputFiles:
+                          - "numbers.txt"
+
+                      - id: reverse
+                        type: io.kestra.plugin.core.storage.Reverse
+                        from: "{{ outputs.generate_file.outputFiles['numbers.txt'] }}"
+
+                """
         ),
-    },
-    aliases = "io.kestra.core.tasks.storages.Reverse"
+    }
 )
 public class Reverse extends Task implements RunnableTask<Reverse.Output> {
     @Schema(
-        title = "The file to be split."
+        title = "The file to be split"
     )
-    @PluginProperty(dynamic = true)
     @NotNull
-    private String from;
+    @PluginProperty(internalStorageURI = true)
+    private Property<String> from;
 
     @Schema(
         title = "The separator used to join the file into chunks. By default, it's a newline `\\n` character. If you are on Windows, you might want to use `\\r\\n` instead."
     )
-    @PluginProperty(dynamic = true)
     @Builder.Default
-    private String separator = "\n";
+    private Property<String> separator = Property.ofValue("\n");
 
     @Schema(
         title = "The name of a supported charset"
     )
     @Builder.Default
-    @PluginProperty(dynamic = true)
-    private final String charset = StandardCharsets.UTF_8.name();
+    private final Property<String> charset = Property.ofValue(StandardCharsets.UTF_8.name());
 
     @Override
     public Reverse.Output run(RunContext runContext) throws Exception {
-        URI from = new URI(runContext.render(this.from));
+        URI from = new URI(runContext.render(this.from).as(String.class).orElseThrow());
         String extension = FileUtils.getExtension(from);
-        String separator = runContext.render(this.separator);
-        Charset charset = Charsets.toCharset(runContext.render(this.charset));
+        String separator = runContext.render(this.separator).as(String.class).orElseThrow();
+        Charset charset = Charsets.toCharset(runContext.render(this.charset).as(String.class).orElseThrow());
 
         File tempFile = runContext.workingDir().createTempFile(extension).toFile();
 
@@ -100,7 +120,7 @@ public class Reverse extends Task implements RunnableTask<Reverse.Output> {
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "The URIs of reverse files in the Kestra's internal storage."
+            title = "The URIs of reverse files in the Kestra's internal storage"
         )
         private final URI uri;
     }

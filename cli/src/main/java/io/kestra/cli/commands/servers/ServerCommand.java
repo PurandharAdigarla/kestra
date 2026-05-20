@@ -1,15 +1,15 @@
 package io.kestra.cli.commands.servers;
 
-import io.micronaut.configuration.picocli.PicocliRunner;
+import io.kestra.cli.AbstractCommand;
+import io.kestra.cli.Kestra;
+
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import io.kestra.cli.AbstractCommand;
-import io.kestra.cli.App;
 import picocli.CommandLine;
 
 @CommandLine.Command(
     name = "server",
-    description = "handle servers",
+    description = "Manage servers",
     mixinStandardHelpOptions = true,
     subcommands = {
         ExecutorCommand.class,
@@ -18,7 +18,8 @@ import picocli.CommandLine;
         StandAloneCommand.class,
         WebServerCommand.class,
         WorkerCommand.class,
-        LocalCommand.class,
+        ControllerCommand.class,
+        LocalCommand.class
     }
 )
 @Slf4j
@@ -28,8 +29,6 @@ public class ServerCommand extends AbstractCommand {
     public Integer call() throws Exception {
         super.call();
 
-        PicocliRunner.call(App.class, "server",  "--help");
-
-        return 0;
+        return Kestra.runCli(new String[] { "server", "--help" });
     }
 }

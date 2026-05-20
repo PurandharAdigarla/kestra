@@ -1,22 +1,5 @@
 package io.kestra.jdbc;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.collect.ImmutableMap;
-import io.kestra.core.exceptions.DeserializationException;
-import io.kestra.core.models.executions.metrics.MetricAggregation;
-import io.kestra.core.queues.QueueService;
-import io.kestra.core.repositories.ArrayListTotal;
-import io.kestra.core.utils.IdUtils;
-import io.micronaut.data.model.Pageable;
-import io.micronaut.data.model.Sort;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.SneakyThrows;
-import org.apache.commons.lang3.StringUtils;
-import org.jooq.Record;
-import org.jooq.*;
-import org.jooq.impl.DSL;
-
 import java.io.IOException;
 import java.sql.Timestamp;
 import java.time.DayOfWeek;
@@ -26,12 +9,35 @@ import java.time.ZonedDateTime;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
+
+import org.apache.commons.lang3.StringUtils;
+import org.jooq.*;
+import org.jooq.Record;
+import org.jooq.exception.DataAccessException;
+import org.jooq.impl.DSL;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.kestra.core.exceptions.DeserializationException;
+import io.kestra.core.models.HasUID;
+import io.kestra.core.models.executions.metrics.MetricAggregation;
+import io.kestra.core.repositories.ArrayListTotal;
+import io.kestra.core.utils.IdUtils;
+
+import io.micronaut.data.model.Pageable;
+import io.micronaut.data.model.Sort;
+import io.micronaut.data.model.Sort.Order;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.SneakyThrows;
+
+import static io.kestra.core.utils.CaseUtils.camelToSnake;
+import static io.kestra.jdbc.repository.AbstractJdbcRepository.*;
 
 public abstract class AbstractJdbcRepository<T> {
     protected static final ObjectMapper MAPPER = JdbcMapper.of();
-
-    protected final QueueService queueService;
 
     protected final Class<T> cls;
 
@@ -47,10 +53,8 @@ public abstract class AbstractJdbcRepository<T> {
     @SuppressWarnings("unchecked")
     public AbstractJdbcRepository(
         JdbcTableConfig tableConfig,
-        QueueService queueService,
         JooqDSLContextWrapper dslContextWrapper) {
         this.cls = (Class<T>) tableConfig.cls();
-        this.queueService = queueService;
         this.dslContextWrapper = dslContextWrapper;
         this.table = DSL.table(tableConfig.table());
     }
@@ -58,7 +62,7 @@ public abstract class AbstractJdbcRepository<T> {
     abstract public Condition fullTextCondition(List<String> fields, String query);
 
     public String key(T entity) {
-        String key = queueService.key(entity);
+        String key = entity instanceof HasUID hasUID ? hasUID.uid() : null;
 
         if (key != null) {
             return key;
@@ -69,54 +73,195 @@ public abstract class AbstractJdbcRepository<T> {
 
     @SneakyThrows
     public Map<Field<Object>, Object> persistFields(T entity) {
-        return new HashMap<>(ImmutableMap
-            .of(io.kestra.jdbc.repository.AbstractJdbcRepository.field("value"), MAPPER.writeValueAsString(entity))
-        );
+        Map<Field<Object>, Object> fields = HashMap.newHashMap(1);
+        fields.put(VALUE_FIELD, MAPPER.writeValueAsString(entity));
+        return fields;
     }
 
+    /**
+     * Fetches an entity using {@code fetcher}, or inserts a default one (via {@code defaultEntity}) if absent, then re-fetches.
+     * The {@code fetcher} should use {@code FOR UPDATE} so the returned entity is locked within the caller's transaction.
+     */
+    public T getOrInsert(DSLContext dslContext, Supplier<Optional<T>> fetcher, Supplier<T> defaultEntity) {
+        // Note: ideally, we should emit an INSERT IGNORE or ON CONFLICT DO NOTHING but H2 didn't support it.
+        // So to avoid the case where no record exists and two threads insert concurrently, in H2, we select/insert and if the insert fails, select again.
+        // Anyway, this would only occur once in a record lifecycle, so even if it's not elegant, it should work.
+        // But as this pattern didn't work with Postgres, we emit INSERT IGNORE in Postgres and MySQL, so we're sure it works there also, and it's better than relying on exception.
+        return fetcher.get().orElseGet(() -> {
+            try {
+                T entity = defaultEntity.get();
+                Map<Field<Object>, Object> fields = this.persistFields(entity);
+                var insert = dslContext
+                    .insertInto(this.getTable())
+                    .set(KEY_FIELD, this.key(entity))
+                    .set(fields);
+                if (dslContext.configuration().dialect().supports(SQLDialect.POSTGRES) || dslContext.configuration().dialect().supports(SQLDialect.MYSQL)) {
+                    insert.onDuplicateKeyIgnore().execute();
+                } else {
+                    insert.execute();
+                }
+            } catch (DataAccessException e) {
+                // we ignore any constraint violation
+            }
+            // refetch to have a lock on it
+            // at this point we are sure the record is inserted so it should never throw
+            return fetcher.get().orElseThrow();
+        });
+    }
+
+    public int count(Condition condition) {
+        return getDslContextWrapper()
+            .transactionResult(
+                configuration -> DSL
+                    .using(configuration)
+                    .selectCount()
+                    .from(getTable())
+                    .where(condition)
+                    .fetchOne(0, Integer.class)
+            );
+    }
+
+    /**
+     * Do an insert or update on the table (upsert).
+     * This is convenient to be fault-tolerant of possible conflict but is less performant than an UPDATE is we're sure the entity exists.
+     *
+     * @see #persist(T, Map)
+     * @see #persist(T, DSLContext, Map)
+     * @see #update(T)
+     * @see #update(T, Map)
+     * @see #update(T, DSLContext, Map)
+     */
     public void persist(T entity) {
         this.persist(entity, null);
     }
 
+
+    /**
+     * Do an insert or update on the table (upsert).
+     * This is convenient to be fault-tolerant of possible conflict but is less performant than an UPDATE is we're sure the entity exists.
+     *
+     * @see #persist(T)
+     * @see #persist(T, DSLContext, Map)
+     * @see #update(T)
+     * @see #update(T, Map)
+     * @see #update(T, DSLContext, Map)
+     */
     public void persist(T entity, Map<Field<Object>, Object> fields) {
-        dslContextWrapper.transaction(configuration ->
-            this.persist(entity, DSL.using(configuration), fields)
+        dslContextWrapper.transaction(
+            configuration -> this.persist(entity, DSL.using(configuration), fields)
         );
     }
 
+    /**
+     * Do an insert or update on the table (upsert).
+     * This is convenient to be fault-tolerant of possible conflict but is less performant than an UPDATE is we're sure the entity exists.
+     *
+     * @see #persist(T)
+     * @see #persist(T, Map)
+     * @see #update(T)
+     * @see #update(T, Map)
+     * @see #update(T, DSLContext, Map)
+     */
     public void persist(T entity, DSLContext dslContext, Map<Field<Object>, Object> fields) {
         Map<Field<Object>, Object> finalFields = fields == null ? this.persistFields(entity) : fields;
 
         dslContext
             .insertInto(table)
-            .set(io.kestra.jdbc.repository.AbstractJdbcRepository.field("key"), key(entity))
+            .set(KEY_FIELD, key(entity))
             .set(finalFields)
             .onDuplicateKeyUpdate()
             .set(finalFields)
             .execute();
     }
 
-    public int persistBatch(List<T> items) {
-        return dslContextWrapper.transactionResult(configuration -> {
-            DSLContext dslContext = DSL.using(configuration);
-            var inserts = items.stream().map(item -> {
-                    Map<Field<Object>, Object> finalFields = this.persistFields(item);
+    /**
+     * Update the entity.
+     * For a safer upsert approach see the corresponding <code>persist()</code> methods
+     *
+     * @see #update(Object, Map)
+     * @see #update(Object, DSLContext, Map)
+     * @see #persist(Object)
+     * @see #persist(Object, Map)
+     * @see #persist(Object, DSLContext, Map)
+     */
+    public void update(T entity) {
+        this.persist(entity, null);
+    }
 
-                    return dslContext
-                        .insertInto(table)
-                        .set(io.kestra.jdbc.repository.AbstractJdbcRepository.field("key"), key(item))
-                        .set(finalFields)
-                        .onDuplicateKeyUpdate()
-                        .set(finalFields);
-                })
+    /**
+     * Update the entity.
+     * For a safer upsert approach see the corresponding <code>persist()</code> methods
+     *
+     * @see #update(Object)
+     * @see #update(Object, DSLContext, Map)
+     * @see #persist(Object)
+     * @see #persist(Object, Map)
+     * @see #persist(Object, DSLContext, Map)
+     */
+    public void update(T entity, Map<Field<Object>, Object> fields) {
+        dslContextWrapper.transaction(
+            configuration -> this.persist(entity, DSL.using(configuration), fields)
+        );
+    }
+
+    /**
+     * Update the entity.
+     * For a safer upsert approach see the corresponding <code>persist()</code> methods
+     *
+     * @see #update(Object)
+     * @see #update(Object, Map)
+     * @see #persist(Object)
+     * @see #persist(Object, Map)
+     * @see #persist(Object, DSLContext, Map)
+     */
+    public void update(T entity, DSLContext dslContext, Map<Field<Object>, Object> fields) {
+        Map<Field<Object>, Object> finalFields = fields == null ? this.persistFields(entity) : fields;
+
+        dslContext
+            .update(table)
+            .set(finalFields)
+            .where(KEY_FIELD.eq(key(entity)))
+            .execute();
+    }
+
+    public int persistBatch(List<T> items) {
+        return dslContextWrapper.transactionResult(configuration ->
+        {
+            DSLContext dslContext = DSL.using(configuration);
+            var inserts = items.stream()
+                .map(item -> buildInsertRequest(item, this.persistFields(item), dslContext))
                 .toList();
 
             return Arrays.stream(dslContext.batch(inserts).execute()).sum();
         });
     }
 
+    public int persistBatch(Map<T, Map<Field<Object>, Object>> itemWithFields) {
+        return dslContextWrapper.transactionResult(configuration ->
+        {
+            DSLContext dslContext = DSL.using(configuration);
+            var inserts = itemWithFields.entrySet()
+                .stream().map(entry -> buildInsertRequest(entry.getKey(), entry.getValue(), dslContext))
+                .toList();
+
+            return Arrays.stream(dslContext.batch(inserts).execute()).sum();
+        });
+    }
+
+    protected InsertOnDuplicateSetMoreStep<Record> buildInsertRequest(T entity, Map<Field<Object>, Object> fields,
+        DSLContext dslContext) {
+
+        return dslContext
+            .insertInto(table)
+            .set(KEY_FIELD, key(entity))
+            .set(fields)
+            .onDuplicateKeyUpdate()
+            .set(fields);
+    }
+
     public int delete(T entity) {
-        return dslContextWrapper.transactionResult(configuration -> {
+        return dslContextWrapper.transactionResult(configuration ->
+        {
             return this.delete(DSL.using(configuration), entity);
         });
     }
@@ -124,7 +269,7 @@ public abstract class AbstractJdbcRepository<T> {
     public int delete(DSLContext dslContext, T entity) {
         DeleteConditionStep<Record> key = dslContext
             .delete(table)
-            .where(io.kestra.jdbc.repository.AbstractJdbcRepository.field("key").eq(key(entity)));
+            .where(KEY_FIELD.eq(key(entity)));
 
         return key.execute();
     }
@@ -205,6 +350,17 @@ public abstract class AbstractJdbcRepository<T> {
         return this.fetchPage(context, select, pageable, this::map);
     }
 
+    @SuppressWarnings("unchecked")
+    public <R extends Record> Select<R> buildQuery(DSLContext context, SelectConditionStep<R> select, String orderField) {
+        return (Select<R>) context.select(DSL.asterisk())
+            .from(
+                this
+                    .sort(select, Pageable.from(Sort.of(Order.asc(orderField))))
+                    .asTable("page")
+            )
+            .where(DSL.noCondition());
+    }
+
     @SneakyThrows
     public List<String> fragments(String query, String yaml) {
         List<String> split = Arrays.asList(StringUtils.split(yaml, "\n"));
@@ -220,7 +376,8 @@ public abstract class AbstractJdbcRepository<T> {
         List<String> fragments = split
             .subList(min, max)
             .stream()
-            .map(r -> {
+            .map(r ->
+            {
                 int i = StringUtils.indexOfIgnoreCase(r, query);
 
                 if (i < 0) {
@@ -234,15 +391,17 @@ public abstract class AbstractJdbcRepository<T> {
         return Collections.singletonList(String.join("\n", fragments));
     }
 
-    protected <R extends Record> SelectConditionStep<R> sort(SelectConditionStep<R> select, Pageable pageable) {
+    public <R extends Record> SelectConditionStep<R> sort(SelectConditionStep<R> select, Pageable pageable) {
         if (pageable != null && pageable.getSort().isSorted()) {
             pageable
                 .getSort()
                 .getOrderBy()
-                .forEach(order -> {
-                    Field<Object> field = io.kestra.jdbc.repository.AbstractJdbcRepository.field(order.getProperty());
+                .forEach(order ->
+                {
+                    String column = camelToSnake(order.getProperty());
+                    Field<Object> field = DSL.field(DSL.name(column));
 
-                    select.orderBy(order.getDirection() == Sort.Order.Direction.ASC ? field.asc() : field.desc());
+                    select.orderBy(order.getDirection() == Sort.Order.Direction.ASC ? field.asc().nullsFirst() : field.desc().nullsLast());
                 });
         }
 
@@ -250,9 +409,9 @@ public abstract class AbstractJdbcRepository<T> {
     }
 
     protected <R extends Record> Select<R> limit(SelectConditionStep<R> select, Pageable pageable) {
-       if (pageable == null || pageable.getSize() == -1) {
-           return select;
-       }
+        if (pageable == null || pageable.getSize() == -1) {
+            return select;
+        }
 
         return select
             .limit(pageable.getSize())

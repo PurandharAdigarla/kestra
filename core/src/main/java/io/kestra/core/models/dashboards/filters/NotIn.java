@@ -1,6 +1,10 @@
 package io.kestra.core.models.dashboards.filters;
 
+import java.time.ZonedDateTime;
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -10,14 +14,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
-import java.time.ZonedDateTime;
-import java.util.List;
-
 @SuperBuilder
 @Getter
 @NoArgsConstructor
 @EqualsAndHashCode
-public class NotIn <F extends Enum<F>> extends AbstractFilter<F> {
+@Schema(title = "NOT_IN")
+public class NotIn<F extends Enum<F>> extends AbstractFilter<F> {
     @NotNull
     @JsonInclude
     @Builder.Default
@@ -25,6 +27,6 @@ public class NotIn <F extends Enum<F>> extends AbstractFilter<F> {
 
     @NotNull
     @NotEmpty
-    @Schema(anyOf = {Number[].class, String[].class, ZonedDateTime[].class})
+    @Schema(anyOf = { Number[].class, String[].class, ZonedDateTime[].class })
     private List<Object> values;
 }

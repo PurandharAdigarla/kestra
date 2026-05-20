@@ -1,0 +1,141 @@
+name: Pull Request Workflow
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-pr
+  cancel-in-progress: true
+
+jobs:
+  # When an OSS ci start, we trigger an EE one
+  trigger-ee:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Generate GitHub App token for kestra-ee dispatch
+      id: ee-token
+      if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false }}
+      uses: actions/create-github-app-token@v3
+      with:
+        app-id: ${{ secrets.GH_BOT_APP_ID }}
+        private-key: ${{ secrets.GH_BOT_PRIVATE_KEY }}
+        owner: kestra-io
+        repositories: kestra-ee
+
+    # PR pre-check: skip if PR from a fork OR EE already has a branch with same name
+    - name: Check EE repo for branch with same name
+      if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false }}
+      id: check-ee-branch
+      uses: actions/github-script@v9
+      with:
+        github-token: ${{ steps.ee-token.outputs.token }}
+        script: |
+          const pr = context.payload.pull_request;
+          if (!pr) {
+            core.setOutput('exists', 'false');
+            return;
+          }
+          const branch = pr.head.ref;
+          const [owner, repo] = 'kestra-io/kestra-ee'.split('/');
+          try {
+            await github.rest.repos.getBranch({ owner, repo, branch });
+            core.setOutput('exists', 'true');
+          } catch (e) {
+            if (e.status === 404) {
+              core.setOutput('exists', 'false');
+            } else {
+              core.setFailed(e.message);
+            }
+          }
+
+      # Targeting pull request (only if not from a fork and EE has no branch with same name)
+    - name: Trigger EE Workflow (pull request, with payload)
+      uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697
+      if: ${{ github.event_name == 'pull_request'
+        && github.event.pull_request.number != ''
+        && github.event.pull_request.head.repo.fork == false
+        && steps.check-ee-branch.outputs.exists == 'false' }}
+      with:
+        token: ${{ steps.ee-token.outputs.token }}
+        repository: kestra-io/kestra-ee
+        event-type: "oss-updated"
+        client-payload: >-
+          {"commit_sha":"${{ github.event.pull_request.head.sha }}","pr_repo":"${{ github.repository }}"}
+
+      # Always trigger EE OpenAPI check on non-fork PRs (regardless of EE same-name branch)
+    - name: Trigger EE OpenAPI spec check
+      uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697
+      if: ${{ github.event_name == 'pull_request'
+        && github.event.pull_request.number != ''
+        && github.event.pull_request.head.repo.fork == false }}
+      with:
+        token: ${{ steps.ee-token.outputs.token }}
+        repository: kestra-io/kestra-ee
+        event-type: "oss-pr-openapi-check"
+        client-payload: >-
+          {"commit_sha":"${{ github.event.pull_request.head.sha }}","pr_number":"${{ github.event.pull_request.number }}","oss_branch":"${{ github.event.pull_request.head.ref }}"}
+
+  file-changes:
+    if: ${{ github.event.pull_request.draft == false }}
+    name: File changes detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      ui: ${{ steps.changes.outputs.ui }}
+      translations: ${{ steps.changes.outputs.translations }}
+      backend: ${{ steps.changes.outputs.backend }}
+    steps:
+      - uses: dorny/paths-filter@v4
+        id: changes
+        with:
+          filters: |
+            ui:
+              - 'ui/**'
+            ui-design-system:
+              - 'ui/packages/design-system/**'
+            backend:
+              - '!{ui,.github}/**'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  frontend:
+    name: Frontend - Tests
+    needs: [file-changes]
+    if: "needs.file-changes.outputs.ui == 'true'"
+    uses: kestra-io/actions/.github/workflows/kestra-oss-frontend-tests.yml@main
+    secrets:
+      GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  design-system-frontend:
+    name: Frontend - Design System tests
+    needs: [file-changes]
+    if: "needs.file-changes.outputs.ui-design-system == 'true'"
+    uses: kestra-io/actions/.github/workflows/kestra-oss-designsystem-tests.yml@main
+    secrets:
+      GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  backend:
+    name: Backend - Tests
+    needs: file-changes
+    if: "needs.file-changes.outputs.backend == 'true'"
+    uses: kestra-io/actions/.github/workflows/kestra-oss-backend-tests.yml@main
+    secrets:
+      GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+      DEVELOCITY_ACCESS_KEY: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+    with:
+      java-version: 25
+
+  e2e-tests:
+    name: E2E - Tests
+    uses: kestra-io/actions/.github/workflows/kestra-oss-e2e-tests.yml@main
+    with:
+      java-version: 25
+
+  generate-pull-request-docker-image:
+    name: Generate PR docker image
+    uses: kestra-io/actions/.github/workflows/kestra-oss-pullrequest-publish-docker.yml@main
+    with:
+      java-version: 25

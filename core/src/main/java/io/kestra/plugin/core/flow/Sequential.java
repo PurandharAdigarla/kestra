@@ -1,34 +1,26 @@
 package io.kestra.plugin.core.flow;
 
+import java.util.List;
+import java.util.Optional;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.executions.NextTaskRun;
 import io.kestra.core.models.executions.TaskRun;
+import io.kestra.core.models.flows.State;
 import io.kestra.core.models.hierarchies.AbstractGraph;
 import io.kestra.core.models.hierarchies.GraphCluster;
 import io.kestra.core.models.hierarchies.RelationType;
-import io.kestra.core.models.tasks.FlowableTask;
-import io.kestra.core.models.tasks.ResolvedTask;
-import io.kestra.core.models.tasks.Task;
-import io.kestra.core.models.tasks.VoidOutput;
+import io.kestra.core.models.tasks.*;
 import io.kestra.core.runners.FlowableUtils;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.GraphUtils;
-import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.ToString;
-import lombok.experimental.SuperBuilder;
 
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotEmpty;
-import java.util.List;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
 
 @SuperBuilder
 @ToString
@@ -36,8 +28,8 @@ import java.util.stream.Stream;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Run tasks sequentially, one after the other, in the order they are defined.",
-    description = "Used to visually group tasks."
+    title = "Run child tasks sequentially.",
+    description = "Executes the listed tasks one after another, with optional `errors` and `finally` hooks. Useful for grouping steps when mixing with parallel constructs."
 )
 @Plugin(
     examples = {
@@ -64,18 +56,9 @@ import java.util.stream.Stream;
                     format: "{{ task.id }} > {{ taskrun.startDate }}"
                 """
         )
-    },
-    aliases = "io.kestra.core.tasks.flows.Sequential"
+    }
 )
-public class Sequential extends Task implements FlowableTask<VoidOutput> {
-    @Valid
-    protected List<Task> errors;
-
-    @Valid
-    @PluginProperty
-    // FIXME -> issue with Pause @NotEmpty
-    private List<Task> tasks;
-
+public class Sequential extends AbstractBranch<VoidOutput> {
     @Override
     public AbstractGraph tasksTree(Execution execution, TaskRun taskRun, List<String> parentValues) throws IllegalVariableEvaluationException {
         GraphCluster subGraph = new GraphCluster(this, taskRun, parentValues, RelationType.SEQUENTIAL);
@@ -84,6 +67,7 @@ public class Sequential extends Task implements FlowableTask<VoidOutput> {
             subGraph,
             this.getTasks(),
             this.errors,
+            this._finally,
             taskRun,
             execution
         );
@@ -92,18 +76,19 @@ public class Sequential extends Task implements FlowableTask<VoidOutput> {
     }
 
     @Override
-    public List<Task> allChildTasks() {
-        return Stream
-            .concat(
-                this.getTasks() != null ? this.getTasks().stream() : Stream.empty(),
-                this.getErrors() != null ? this.getErrors().stream() : Stream.empty()
-            )
-            .toList();
-    }
+    public Optional<State.Type> resolveState(RunContext runContext, Execution execution, TaskRun parentTaskRun) throws IllegalVariableEvaluationException {
+        List<ResolvedTask> childTasks = this.childTasks(runContext, parentTaskRun);
 
-    @Override
-    public List<ResolvedTask> childTasks(RunContext runContext, TaskRun parentTaskRun) throws IllegalVariableEvaluationException {
-        return FlowableUtils.resolveTasks(this.getTasks(), parentTaskRun);
+        return FlowableUtils.resolveSequentialState(
+            execution,
+            childTasks,
+            FlowableUtils.resolveTasks(this.getErrors(), parentTaskRun),
+            FlowableUtils.resolveTasks(this.getFinally(), parentTaskRun),
+            parentTaskRun,
+            runContext,
+            this.isAllowFailure(),
+            this.isAllowWarning()
+        );
     }
 
     @Override
@@ -112,6 +97,7 @@ public class Sequential extends Task implements FlowableTask<VoidOutput> {
             execution,
             this.childTasks(runContext, parentTaskRun),
             FlowableUtils.resolveTasks(this.getErrors(), parentTaskRun),
+            FlowableUtils.resolveTasks(this.getFinally(), parentTaskRun),
             parentTaskRun
         );
     }

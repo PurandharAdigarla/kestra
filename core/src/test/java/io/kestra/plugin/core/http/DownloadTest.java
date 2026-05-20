@@ -1,37 +1,44 @@
 package io.kestra.plugin.core.http;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+import org.apache.commons.io.IOUtils;
+import org.junit.jupiter.api.Test;
+
 import com.google.common.collect.ImmutableMap;
+
+import io.kestra.core.context.TestRunContextFactory;
+import io.kestra.core.http.client.HttpClientResponseException;
+import io.kestra.core.http.client.configurations.HttpConfiguration;
 import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.storages.StorageInterface;
 import io.kestra.core.utils.TestsUtils;
+
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.http.HttpHeaders;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.annotation.Controller;
 import io.micronaut.http.annotation.Get;
-import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.runtime.server.EmbeddedServer;
 import jakarta.inject.Inject;
-import org.apache.commons.io.IOUtils;
-import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 
-import java.io.IOException;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
-
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.*;
+import static io.kestra.core.tenant.TenantService.MAIN_TENANT;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
 class DownloadTest {
-    public static final String FILE = "https://sampletestfile.com/wp-content/uploads/2023/07/500KB-CSV.csv";
+    private static final String CSV_CONTENT = "id,name,value\n1,foo,100\n2,bar,200\n3,baz,300\n";
+
     @Inject
-    private RunContextFactory runContextFactory;
+    private TestRunContextFactory runContextFactory;
 
     @Inject
     private StorageInterface storageInterface;
@@ -41,21 +48,24 @@ class DownloadTest {
 
     @Test
     void run() throws Exception {
+        EmbeddedServer embeddedServer = applicationContext.getBean(EmbeddedServer.class);
+        embeddedServer.start();
+
+        String url = embeddedServer.getURI() + "/sample.csv";
+
         Download task = Download.builder()
             .id(DownloadTest.class.getSimpleName())
             .type(DownloadTest.class.getName())
-            .uri(FILE)
+            .uri(Property.ofValue(url))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
 
         Download.Output output = task.run(runContext);
 
-        assertThat(
-            IOUtils.toString(this.storageInterface.get(null, null, output.getUri()), StandardCharsets.UTF_8),
-            is(IOUtils.toString(new URI(FILE).toURL().openStream(), StandardCharsets.UTF_8))
-        );
-        assertThat(output.getUri().toString(), endsWith(".csv"));
+        assertThat(IOUtils.toString(this.storageInterface.get(MAIN_TENANT, null, output.getUri()), StandardCharsets.UTF_8))
+            .isEqualTo(CSV_CONTENT);
+        assertThat(output.getUri().toString()).endsWith(".csv");
     }
 
     @Test
@@ -66,7 +76,7 @@ class DownloadTest {
         Download task = Download.builder()
             .id(DownloadTest.class.getSimpleName())
             .type(DownloadTest.class.getName())
-            .uri(embeddedServer.getURI() + "/204")
+            .uri(Property.ofValue(embeddedServer.getURI() + "/204"))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
@@ -76,7 +86,7 @@ class DownloadTest {
             () -> task.run(runContext)
         );
 
-        assertThat(exception.getMessage(), is("No response from server"));
+        assertThat(exception.getMessage()).isEqualTo("No response from server");
     }
 
     @Test
@@ -86,16 +96,16 @@ class DownloadTest {
 
         Download task = Download.builder()
             .id(DownloadTest.class.getSimpleName())
-            .failOnEmptyResponse(false)
+            .failOnEmptyResponse(Property.ofValue(false))
             .type(DownloadTest.class.getName())
-            .uri(embeddedServer.getURI() + "/204")
+            .uri(Property.ofValue(embeddedServer.getURI() + "/204"))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
         Download.Output output = assertDoesNotThrow(() -> task.run(runContext));
 
-        assertThat(output.getLength(), is(0L));
-        assertThat(IOUtils.toString(this.storageInterface.get(null, null, output.getUri()), StandardCharsets.UTF_8), is(""));
+        assertThat(output.getLength()).isEqualTo(0L);
+        assertThat(IOUtils.toString(this.storageInterface.get(MAIN_TENANT, null, output.getUri()), StandardCharsets.UTF_8)).isEqualTo("");
     }
 
     @Test
@@ -106,7 +116,7 @@ class DownloadTest {
         Download task = Download.builder()
             .id(DownloadTest.class.getSimpleName())
             .type(DownloadTest.class.getName())
-            .uri(embeddedServer.getURI() + "/500")
+            .uri(Property.ofValue(embeddedServer.getURI() + "/500"))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
@@ -116,7 +126,25 @@ class DownloadTest {
             () -> task.run(runContext)
         );
 
-        assertThat(exception.getMessage(), is("Internal Server Error"));
+        assertThat(exception.getMessage()).contains("Failed http request with response code '500'");
+    }
+
+    @Test
+    void chunked() throws Exception {
+        EmbeddedServer embeddedServer = applicationContext.getBean(EmbeddedServer.class);
+        embeddedServer.start();
+
+        Download task = Download.builder()
+            .id(DownloadTest.class.getSimpleName())
+            .type(DownloadTest.class.getName())
+            .uri(Property.ofValue(embeddedServer.getURI() + "/chunked"))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
+
+        Download.Output output = task.run(runContext);
+
+        assertThat(this.storageInterface.get(MAIN_TENANT, null, output.getUri()).readAllBytes().length).isEqualTo(10000 * 12);
     }
 
     @Test
@@ -127,14 +155,33 @@ class DownloadTest {
         Download task = Download.builder()
             .id(DownloadTest.class.getSimpleName())
             .type(DownloadTest.class.getName())
-            .uri(embeddedServer.getURI() + "/content-disposition")
+            .uri(Property.ofValue(embeddedServer.getURI() + "/content-disposition"))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
 
         Download.Output output = task.run(runContext);
 
-        assertThat(output.getUri().toString(), endsWith("filename.jpg"));
+        assertThat(output.getUri().toString()).endsWith("filename.jpg");
+    }
+
+    @Test
+    void fileNameShouldOverrideContentDisposition() throws Exception {
+        EmbeddedServer embeddedServer = applicationContext.getBean(EmbeddedServer.class);
+        embeddedServer.start();
+
+        Download task = Download.builder()
+            .id(DownloadTest.class.getSimpleName())
+            .type(DownloadTest.class.getName())
+            .uri(Property.ofValue(embeddedServer.getURI() + "/content-disposition"))
+            .saveAs(Property.ofValue("hardcoded-filename.jpg"))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
+
+        Download.Output output = task.run(runContext);
+
+        assertThat(output.getUri().toString()).endsWith("hardcoded-filename.jpg");
     }
 
     @Test
@@ -145,42 +192,99 @@ class DownloadTest {
         Download task = Download.builder()
             .id(DownloadTest.class.getSimpleName())
             .type(DownloadTest.class.getName())
-            .uri(embeddedServer.getURI() + "/content-disposition")
+            .uri(Property.ofValue(embeddedServer.getURI() + "/content-disposition"))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
 
         Download.Output output = task.run(runContext);
 
-        assertThat(output.getUri().toString(), not(containsString("/secure-path/")));
-        assertThat(output.getUri().toString(), endsWith("filename.jpg"));
+        assertThat(output.getUri().toString()).doesNotContain("/secure-path/");
+        assertThat(output.getUri().toString()).endsWith("filename.jpg");
     }
 
     @Test
     void failed() throws Exception {
-        try (
-            ApplicationContext applicationContext = ApplicationContext.run();
-            EmbeddedServer server = applicationContext.getBean(EmbeddedServer.class).start();
+        EmbeddedServer server = applicationContext.getBean(EmbeddedServer.class).start();
 
-        ) {
-            Download task = Download.builder()
-                .id(Download.class.getSimpleName())
-                .type(Download.class.getName())
-                .uri(server.getURL().toString() + "/hello417")
-                .allowFailed(true)
-                .build();
+        Download task = Download.builder()
+            .id(Download.class.getSimpleName())
+            .type(Download.class.getName())
+            .uri(Property.ofValue(server.getURL().toString() + "/hello417"))
+            .options(HttpConfiguration.builder().allowFailed(Property.ofValue(true)).build())
+            .build();
 
-            RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
+        RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
 
-            Download.Output output = task.run(runContext);
+        Download.Output output = task.run(runContext);
 
-            assertThat(output.getHeaders().get("content-type"), is(List.of("application/json")));
-            assertThat(output.getCode(), is(417));
-        }
+        assertThat(output.getHeaders().get("content-type")).isEqualTo(List.of("application/json"));
+        assertThat(output.getCode()).isEqualTo(417);
+    }
+
+    @Test
+    void contentDispositionWithDoubleDot() throws Exception {
+        EmbeddedServer embeddedServer = applicationContext.getBean(EmbeddedServer.class);
+        embeddedServer.start();
+
+        Download task = Download.builder()
+            .id(DownloadTest.class.getSimpleName())
+            .type(DownloadTest.class.getName())
+            .uri(Property.ofValue(embeddedServer.getURI() + "/content-disposition-double-dot"))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
+
+        Download.Output output = task.run(runContext);
+
+        assertThat(output.getUri().toString()).doesNotContain("/secure-path/");
+        assertThat(output.getUri().toString()).endsWith("filename..jpg");
+    }
+
+    @Test
+    void contentDispositionWithSpaceAfterDot() throws Exception {
+        EmbeddedServer embeddedServer = applicationContext.getBean(EmbeddedServer.class);
+        embeddedServer.start();
+
+        Download task = Download.builder()
+            .id(DownloadTest.class.getSimpleName())
+            .type(DownloadTest.class.getName())
+            .uri(Property.ofValue(embeddedServer.getURI() + "/content-disposition-space-after-dot"))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
+
+        Download.Output output = task.run(runContext);
+
+        assertThat(output.getUri().toString()).endsWith("file.with+spaces.txt");
+    }
+
+    @Test
+    void contentDispositionWithBrackets() throws Exception {
+        EmbeddedServer embeddedServer = applicationContext.getBean(EmbeddedServer.class);
+        embeddedServer.start();
+
+        Download task = Download.builder()
+            .id(DownloadTest.class.getSimpleName())
+            .type(DownloadTest.class.getName())
+            .uri(Property.ofValue(embeddedServer.getURI() + "/content-disposition-with-brackets"))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
+
+        Download.Output output = task.run(runContext);
+
+        assertThat(output.getUri().toString()).endsWith("file.with%5B%5Dbrackets.txt");
     }
 
     @Controller()
     public static class SlackWebController {
+        @Get("sample.csv")
+        public HttpResponse<byte[]> csv() {
+            return HttpResponse.ok(CSV_CONTENT.getBytes(StandardCharsets.UTF_8))
+                .contentType(io.micronaut.http.MediaType.TEXT_CSV_TYPE);
+        }
+
         @Get("500")
         public HttpResponse<String> error() {
             return HttpResponse.serverError();
@@ -189,6 +293,17 @@ class DownloadTest {
         @Get("204")
         public HttpResponse<Void> noContent() {
             return HttpResponse.noContent();
+        }
+
+        @Get("chunked")
+        public Flux<byte[]> chunked() {
+            return Flux.create(sink ->
+            {
+                for (int i = 0; i < 10000; i++) {
+                    sink.next("Hello World\n".getBytes());
+                }
+                sink.complete();
+            }, FluxSink.OverflowStrategy.BUFFER);
         }
 
         @Get("content-disposition")
@@ -201,6 +316,24 @@ class DownloadTest {
         public HttpResponse<byte[]> contentDispositionWithPath() {
             return HttpResponse.ok("Hello World".getBytes())
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"/secure-path/filename.jpg\"");
+        }
+
+        @Get("content-disposition-double-dot")
+        public HttpResponse<byte[]> contentDispositionWithDoubleDot() {
+            return HttpResponse.ok("Hello World".getBytes())
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"/secure-path/filename..jpg\"");
+        }
+
+        @Get("content-disposition-space-after-dot")
+        public HttpResponse<byte[]> contentDispositionWithSpaceAfterDot() {
+            return HttpResponse.ok("Hello World".getBytes())
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"file.with spaces.txt\"");
+        }
+
+        @Get("content-disposition-with-brackets")
+        public HttpResponse<byte[]> contentDispositionWithBrackets() {
+            return HttpResponse.ok("Hello World".getBytes())
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"file.with[]brackets.txt\"");
         }
     }
 }

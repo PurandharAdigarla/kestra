@@ -8,14 +8,14 @@
  */
 package io.kestra.core.runners.pebble.filters;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+
 import io.pebbletemplates.pebble.extension.Filter;
 import io.pebbletemplates.pebble.template.EvaluationContext;
 import io.pebbletemplates.pebble.template.PebbleTemplate;
-
-import java.io.UnsupportedEncodingException;
-import java.net.URLDecoder;
-import java.util.List;
-import java.util.Map;
 
 public class UrlDecoderFilter implements Filter {
 
@@ -26,15 +26,12 @@ public class UrlDecoderFilter implements Filter {
 
     @Override
     public Object apply(Object input, Map<String, Object> args, PebbleTemplate self,
-                        EvaluationContext context, int lineNumber) {
+        EvaluationContext context, int lineNumber) {
         if (input == null) {
             return null;
         }
         String arg = (String) input;
-        try {
-            arg = URLDecoder.decode(arg, "UTF-8");
-        } catch (UnsupportedEncodingException e) {
-        }
+        arg = URLDecoder.decode(arg, StandardCharsets.UTF_8);
         return arg;
     }
 

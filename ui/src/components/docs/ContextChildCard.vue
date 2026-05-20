@@ -1,96 +1,94 @@
 <template>
-    <div class="row row-cols-1 row-cols-xxl-2 g-3 card-group">
-        <context-docs-link
-            :href="item.path"
-            class="col"
-            v-for="item in navigation"
-            :key="item.path"
-            use-raw
-        >
-            <div class="card h-100">
-                <div class="card-body d-flex align-items-center">
-                    <span class="card-icon">
-                        <img
-                            :src="$store.getters['doc/resourceUrl'](item.icon)"
-                            :alt="item.title"
-                            width="50px"
-                            height="50px"
-                        >
-                    </span>
-                    <div class="overflow-hidden">
-                        <h4 class="card-title">
-                            {{ item.title }}
-                        </h4>
-                        <p class="card-text mb-0">
-                            {{ item.description?.replaceAll(/\[([^\]]*)\]\([^)]*\)/g, "$1") }}
-                        </p>
+    <KsRow :gutter="16">
+        <KsCol :span="12" v-for="item in navigation" :key="item.path" class="mb-3">
+            <ContextDocsLink
+                :href="item.path"
+                class="flex-1"
+                useRaw
+            >
+                <div class="card h-100">
+                    <div class="card-body d-flex align-items-center">
+                        <span class="card-icon">
+                            <img
+                                v-if="item.icon"
+                                :src="docStore.resourceUrl(item.icon.replace(/^\/src\/contents\//, ''))"
+                                :alt="item.title"
+                                width="50px"
+                                height="50px"
+                            >
+                        </span>
+                        <div class="overflow-hidden">
+                            <h4 class="card-title">
+                                {{ item.title }}
+                            </h4>
+                            <p class="card-text mb-0">
+                                {{ item.description?.replaceAll(/\[([^\]]*)\]\([^)]*\)/g, "$1") }}
+                            </p>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </context-docs-link>
-    </div>
+            </ContextDocsLink>
+        </KsCol>
+    </KsRow>
 </template>
 
-<script setup>
-    import {computed, ref, onMounted} from "vue";
-    import {useStore} from "vuex";
+<script setup lang="ts">
+    import {computed, ref, onMounted} from "vue"
+    import {useDocStore} from "../../stores/doc"
 
-    import ContextDocsLink from "./ContextDocsLink.vue";
+    import ContextDocsLink from "./ContextDocsLink.vue"
 
-    const store = useStore();
+    const docStore = useDocStore()
 
     const props = defineProps({
         pageUrl: {
             type: String,
-            default: undefined
-        }
-    });
+            default: undefined,
+        },
+    })
 
     const currentPage = computed(() => {
         if (props.pageUrl) {
-            return props.pageUrl.replace(/^\//, "").replace(/\/$/, "");
+            return props.pageUrl.replace(/^\//, "").replace(/\/$/, "")
         } else {
-            const p = store.getters["doc/docPath"];
-            return p ? `docs/${p.replace(/^\/?(.*?)\/?$/, "$1").replace(/^\.\//, "/")}` : p;
+            const p = docStore.docPath
+            return p ? p.replace(/^\/?(.*?)\/?$/, "$1").replace(/^\.\//, "/") : "docs"
         }
     })
 
-
-    const resourcesWithMetadata = ref({});
+    const resourcesWithMetadata = ref<Record<string, any>>({})
     onMounted(async () => {
-        resourcesWithMetadata.value = await store.dispatch("doc/children", currentPage.value);
+        resourcesWithMetadata.value = await docStore.children(currentPage.value)
     })
 
     const navigation = computed(() => {
-        let parentMetadata;
+        let parentMetadata: Record<string, any> = {}
         if (props.pageUrl) {
-            parentMetadata = {...resourcesWithMetadata.value[currentPage.value]};
-            delete parentMetadata.description;
+            parentMetadata = {...resourcesWithMetadata.value[currentPage.value]}
+            delete parentMetadata.description
         }
 
-        const parentLevel = currentPage.value.split("/").length;
+        const parentLevel = currentPage.value.split("/").length
         return Object.entries(resourcesWithMetadata.value)
             .filter(([path]) => path.split("/").length === parentLevel + 1)
             .filter(([path]) => path !== currentPage.value)
             .map(([path, metadata]) => ({
                 path: path.replace(/^docs\//, ""),
                 ...parentMetadata,
-                ...metadata
+                ...metadata,
             }))
-    });
-
+    })
 </script>
 
-<style lang="scss" scoped>
-    @import "@kestra-io/ui-libs/src/scss/variables";
+<style scoped lang="scss">
 
     .card-title {
-        font-size: $font-size-xl !important;
+        font-size: var(--ks-font-size-xl) !important;
         line-height: 1.375rem !important;
     }
 
     .card-text {
-        font-size: $font-size-sm !important;
+        font-size: var(--ks-font-size-sm) !important;
         line-height: 1rem !important;
     }
 

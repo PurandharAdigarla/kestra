@@ -1,252 +1,73 @@
 <template>
-    <top-nav-bar v-if="topbar" :title="routeInfo.title">
-        <template #additional-right>
-            <ul>
-                <li>
-                    <el-button v-if="canCreate" tag="router-link" :to="{name: 'flows/create', query: {namespace: $route.query.namespace}}" :icon="Plus" type="primary">
-                        {{ $t('create_flow') }}
-                    </el-button>
-                </li>
-            </ul>
+    <WelcomeCopilot
+        :title="t('ai.flow.title')"
+        :generationType="aiGenerationTypes.FLOW"
+        :examples="resolvedExamples"
+        namespace="tutorial"
+        @generated-yaml="createFlowFromGeneratedPrompt"
+        @create-directly="createFlowFromSelectedExample"
+    >
+        <template v-if="canCreateFlow" #cta>
+            <router-link :to="{name: 'flows/create'}">
+                <KsButton type="primary">
+                    {{ $t("welcome_copilot.button_cta") }}
+                </KsButton>
+            </router-link>
         </template>
-    </top-nav-bar>
-    <div class="main">
-        <div class="section-1">
-            <div class="section-1-main">
-                <div class="section-content">
-                    <img
-                        :src="logo"
-                        alt="Kestra"
-                        class="section-1-img img-fluid"
-                        width="180px"
-                    >
-                    <h2 class="section-1-title">
-                        {{ $t("homeDashboard.wel_text") }}
-                    </h2>
-                    <p class="section-1-desc">
-                        {{ $t("homeDashboard.start") }}
-                    </p>
-                    <router-link :to="{name: 'flows/create'}">
-                        <el-button
-                            :icon="Plus"
-                            size="large"
-                            type="primary"
-                            class="px-3 p-4 section-1-link product-link"
-                        >
-                            {{ $t("welcome button create") }}
-                        </el-button>
-                    </router-link>
-                    <el-button
-                        :icon="Play"
-                        tag="a"
-                        href="https://www.youtube.com/watch?v=a2BZ7vOihjg"
-                        target="_blank"
-                        class="p-3 px-4 mt-0 mb-lg-5 watch"
-                    >
-                        Watch Video
-                    </el-button>
-                </div>
-                <div class="mid-bar mb-3">
-                    <div class="title title--center-line">
-                        {{ $t("homeDashboard.guide") }}
-                    </div>
-                </div>
-                <onboarding-bottom />
-            </div>
-        </div>
-    </div>
+    </WelcomeCopilot>
 </template>
 
+<script setup lang="ts">
+    import {computed} from "vue"
+    import {useRoute, useRouter} from "vue-router"
 
-<script setup>
-    import Plus from "vue-material-design-icons/Plus.vue";
-    import Play from "vue-material-design-icons/Play.vue";
+    import WelcomeCopilot from "./WelcomeCopilot.vue"
+
+    import {flowExamples, labels} from "./flows/index"
+    import {aiGenerationTypes} from "../../utils/constants"
+
+    import resource from "../../models/resource"
+    import action from "../../models/action"
+
+    import {useAuthStore} from "override/stores/auth"
+    const authStore = useAuthStore()
+
+    const canCreateFlow = computed(() => {
+        return authStore.user?.hasAnyActionOnAnyNamespace(
+            resource.FLOW,
+            action.CREATE,
+        )
+    })
+
+    import useRestoreUrl from "../../composables/useRestoreUrl"
+    import useRouteContext from "../../composables/useRouteContext"
+
+    import {useI18n} from "vue-i18n"
+    const {t, te} = useI18n()
+    const route = useRoute()
+    const router = useRouter()
+
+    useRestoreUrl()
+    useRouteContext(computed(() => ({title: t("ai.flow.title")})))
+
+    const ONBOARDING_FLOW_PRESET_KEY = "kestra.onboarding.flowPreset"
+
+    const resolvedExamples = computed(() =>
+        labels.map((label) => ({
+            label: t(flowExamples[label].labelKey),
+            prompt: te(flowExamples[label].promptKey) ? t(flowExamples[label].promptKey) : "",
+            yaml: flowExamples[label].flow,
+        })),
+    )
+
+    async function createFlowFromSelectedExample(flowSource: string) {
+        sessionStorage.setItem(ONBOARDING_FLOW_PRESET_KEY, flowSource)
+        await new Promise(resolve => window.setTimeout(resolve, 1000))
+        void router.push({name: "flows/create", query: {onboardingPreset: "true"}, params: {tenant: route.params.tenant}})
+    }
+
+    async function createFlowFromGeneratedPrompt(flowSource: string) {
+        sessionStorage.setItem(ONBOARDING_FLOW_PRESET_KEY, flowSource)
+        void router.push({name: "flows/create", query: {onboardingPreset: "true"}, params: {tenant: route.params.tenant}})
+    }
 </script>
-
-<script>
-    import {mapGetters, mapState} from "vuex";
-    import OnboardingBottom from "./OnboardingBottom.vue";
-    import kestraWelcome from "../../assets/onboarding/kestra_welcome.svg";
-    import TopNavBar from "../../components/layout/TopNavBar.vue";
-    import RouteContext from "../../mixins/routeContext";
-    import RestoreUrl from "../../mixins/restoreUrl";
-    import permission from "../../models/permission";
-    import action from "../../models/action";
-
-
-    export default {
-        name: "CreateFlow",
-        mixins: [RouteContext, RestoreUrl],
-        components: {
-            OnboardingBottom,
-            TopNavBar
-        },
-        props: {
-            topbar: {
-                type: Boolean,
-                default: true
-            }
-        },
-        computed: {
-            ...mapGetters("core", ["guidedProperties"]),
-            ...mapState("auth", ["user"]),
-            logo() {
-                // get theme
-                return (localStorage.getItem("theme") || "light") === "light" ? kestraWelcome : kestraWelcome;
-            },
-            routeInfo() {
-                return {
-                    title: this.$t("homeDashboard.welcome")
-                };
-            },
-            canCreate() {
-                return this.user && this.user.hasAnyActionOnAnyNamespace(permission.FLOW, action.CREATE);
-            }
-        }
-    }
-
-</script>
-
-<style scoped lang="scss">
-
-    .main {
-        padding: 3rem 1rem 1rem;
-        background: var(--el-text-color-primary);
-        background: radial-gradient(ellipse at top, rgba(102,51,255,0.6) 0%, rgba(253, 253, 253, 0) 20%);
-        background-size: 4000px;
-        background-position: center;
-        height: 100%;
-        width: auto;
-        display: flex;
-        flex-direction: column;
-        container-type: inline-size;
-
-        @media (min-width: 768px) {
-            padding: 3rem 2rem 1rem;
-        }
-
-        @media (min-width: 992px) {
-            padding: 3rem 3rem 1rem;
-        }
-
-        @media (min-width: 1920px) {
-            padding: 3rem 10rem 1rem;
-        }
-    }
-
-    .img-fluid {
-        max-width: 100%;
-        height: auto;
-    }
-
-    .product-link, .watch {
-        background: var(--el-button-bg-color);
-        color: var(--el-button-text-color);
-        font-weight: 700;
-        border-radius: 5px;
-        border: 1px solid var(--el-button-border-color);
-        text-decoration: none;
-        font-size: var(--el-font-size-small);
-        width: 200px;
-        margin-bottom: calc(var(--spacer));
-
-
-    }
-
-    .watch {
-        font-weight: 500;
-        background-color: var(--el-bg-color);
-        color: var(--el-text-color-regular);
-        font-size: var(--el-font-size-small);
-    }
-
-    .main .section-1 {
-        display: flex;
-        flex-grow: 1;
-        justify-content: center;
-        align-items: center;
-        border-radius: var(--bs-border-radius);
-    }
-    .section-1-main {
-        .section-content {
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-
-            .section-1-title {
-                line-height: var(--el-font-line-height-primary);
-                text-align: center;
-                font-size: var(--el-font-size-extra-large);
-                font-weight: 600;
-                color: var(--el-text-color-regular);
-            }
-
-            .section-1-desc {
-                line-height: var(--el-font-line-height-primary);
-                font-weight: 500;
-                font-size: 1rem;
-                text-align: center;
-                color: var(--el-text-color-regular);
-            }
-        }
-
-        .mid-bar {
-            margin-top: 50px;
-
-            .title {
-                font-weight: 500;
-                color: var(--bs-gray-900-lighten-5);
-                display: flex;
-                align-items: center;
-                white-space: nowrap;
-                font-size: var(--el-font-size-extra-small);
-
-                &--center-line {
-                    text-align: center;
-                    padding: 0;
-
-                    &::before,
-                    &::after {
-                        content: "";
-                        background-color: var(--bs-gray-600-lighten-10);
-                        height: 2px;
-                        width: 50%;
-                    }
-
-                    &::before {
-                        margin-right: 1rem;
-                    }
-
-                    &::after {
-                        margin-left: 1rem;
-                    }
-                }
-            }
-        }
-    }
-
-    @container (max-width: 20px) {
-        .main .section-1 .section-1-main {
-            width: 90%;
-        }
-    }
-
-    @container (max-width: 50px) {
-        .main .section-1 .section-1-main {
-            padding-top: 30px;
-        }
-
-        .section-1 .section-1-main .container {
-            width: 76%;
-        }
-
-        .title--center-line {
-            &::before,
-            &::after {
-                width: 50%;
-            }
-        }
-    }
-
-</style>

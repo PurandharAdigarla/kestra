@@ -1,97 +1,113 @@
 <template>
-    <span data-component="FILENAME_PLACEHOLDER" v-if="labels">
-        <!-- 'el-check-tag' would be a better fit but it currently lacks customization -->
-        <el-tag
-            v-for="(value, key) in labelMap"
-            :key="key"
-            :type="checked(key, value) ? 'primary' : 'info'"
-            class="me-1 labels"
-            size="small"
-            disable-transitions
+    <span v-if="props.labels.length" class="d-flex gap-1 labels-container">
+        <KsCheckTag
+            v-for="(label, index) in props.labels"
+            :key="index"
+            :disabled="readOnly"
+            :checked="isChecked(label)"
+            @change="updateLabel(label)"
+            class="me-0 el-tag label"
         >
-            <router-link v-if="filterEnabled" :to="link(key, value)">
-                {{ key }}: {{ value }}
-            </router-link>
-            <template v-else>{{ key }}: {{ value }}</template>
-        </el-tag>
+            <template v-if="!label.key">{{ label.value }}</template>
+            <template v-else>{{ label.key }}:{{ label.value }}</template>
+        </KsCheckTag>
     </span>
 </template>
 
-<script>
-    export default {
-        props: {
-            labels: {
-                type: Object,
-                default: () => {}
-            },
-            filterEnabled: {
-                type: Boolean,
-                default: true
-            }
+<script setup lang="ts">
+    import {watch} from "vue"
+
+    import {useRouter, useRoute} from "vue-router"
+    const router = useRouter()
+    const route = useRoute()
+
+    interface Label {
+        key?: string;
+        value: string;
+    }
+
+    const props = withDefaults(
+        defineProps<{
+            labels?: Label[];
+            readOnly?: boolean;
+            filterType?: "labels" | "metadata" | "type";
+        }>(),
+        {
+            labels: () => [],
+            readOnly: false,
+            filterType: "labels",
         },
-        // this is needed as flows uses a Map and Execution a List of Labels.
-        // if we align both of them this can be removed
-        computed: {
-            labelMap() {
-                if (Array.isArray(this.labels)) {
-                    return Object.fromEntries(this.labels.map(label => [label.key, label.value]));
-                } else {
-                    return this.labels;
-                }
+    )
+
+    import {decodeSearchParams} from "@kestra-io/design-system"
+    let query: any[] = []
+    watch(
+        () => route.query,
+        (q) => (query = decodeSearchParams(q)),
+        {immediate: true},
+    )
+
+    const isChecked = (label: Label) => {
+        return query.some((l) => {
+            if (props.filterType === "type") {
+                return l.field === props.filterType && l.operation === "EQUALS" && typeof l.value === "string" && l.value === label.value
             }
-        },
-        methods: {
-            getLabelsFromQuery() {
-                const labels = new Map();
-                (this.$route.query.labels !== undefined ?
-                    (typeof(this.$route.query.labels) === "string" ? [this.$route.query.labels] : this.$route.query.labels)  :
-                    []
-                )
-                    .forEach(label => {
-                        const separatorIndex = label.indexOf(":");
 
-                        if (separatorIndex === -1) {
-                            return;
-                        }
+            if (typeof l?.value !== "string") return false
 
-                        labels.set(label.slice(0, separatorIndex), label.slice(separatorIndex + 1));
-                    })
+            const [key, value] = l.value.split(":")
+            return l.field === props.filterType && l.operation === "EQUALS" && key === label.key && value === label.value
+        })
+    }
 
-                return labels;
-            },
-            checked(key, value) {
-                return this.getLabelsFromQuery().has(key) && this.getLabelsFromQuery().get(key) === value;
-            },
-            link(key, value) {
-                const labels = this.getLabelsFromQuery();
+    const updateLabel = (label: Label) => {
+        const getKey = (key?: string) => (props.filterType === "type"
+            ? `filters[${props.filterType}][EQUALS]`
+            : `filters[${props.filterType}][EQUALS][${key}]`)
 
-                if (labels.has(key)) {
-                    labels.delete(key);
-                } else {
-                    labels.set(key, value);
-                }
-
-                const qs = {
-                    ...this.$route.query,
-                    ...{"labels": Array.from(labels.keys()).map((key) => key + ":" + labels.get(key))}
-                };
-
-                delete qs.page;
-
-                return {name: this.$route.name, params: this.$route.params, query: qs};
+        if (isChecked(label)) {
+            const replacementQuery = {...route.query} as Record<string, any>
+            delete replacementQuery[props.filterType === "type" ? getKey() : getKey(label.key)]
+            replacementQuery.page = "1"
+            router.replace({query: replacementQuery})
+        } else {
+            const newQuery = {...route.query, page: "1"} as Record<string, any>
+            if (props.filterType === "type") {
+                newQuery[getKey()] = label.value
+            } else {
+                newQuery[getKey(label.key)] = label.value
             }
-        }
-    };
-</script>
-
-<style lang="scss" scoped>
-    :deep(.el-tag) {
-        & a, span {
-            color: var(--bs-white);
-        }
-
-        &.el-tag--info {
-            background: var(--bs-gray-600);
+            router.replace({query: newQuery})
         }
     }
+</script>
+
+<style scoped lang="scss">
+.label {
+    --ks-tag-background: #ECEBEF;
+    --ks-tag-content: var(--ks-content-primary);
+    --ks-tag-background-active: #414557;
+    --ks-tag-content-active: var(--ks-content-inverse);
+
+    html.dark & {
+        --ks-tag-background: #5A6079;
+        --ks-tag-background-active: #F2F2F2;
+    }
+
+    background-color: var(--ks-tag-background);
+    font-weight: normal;
+    color: var(--ks-tag-content);
+    white-space: nowrap;
+}
+
+.labels-container {
+    overflow: hidden;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+.label.kel-check-tag.is-checked {
+    background-color: var(--ks-tag-background-active);
+    color: var(--ks-tag-content-active);
+}
 </style>

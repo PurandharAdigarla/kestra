@@ -1,6 +1,14 @@
 <template>
-    <context-info-content :title="t('feeds.title')">
-        <div class="post" :class="{lastPost: index === 0, expanded: expanded[feed.id]}" v-for="(feed, index) in feeds" :key="feed.id">
+    <ContextInfoContent ref="contextInfoRef" :title="$t('feeds.title')">
+        <div
+            class="post"
+            :class="{
+                lastPost: index === 0,
+                expanded: expanded[feed.id]
+            }"
+            v-for="(feed, index) in feeds"
+            :key="feed.id"
+        >
             <div v-if="feed.image" class="mr-2">
                 <img :src="feed.image" alt="">
             </div>
@@ -8,69 +16,73 @@
                 <h5>
                     {{ feed.title }}
                 </h5>
-                <date-ago class-name="news-date small" :inverted="true" :date="feed.publicationDate" format="LL" />
+                <KsDateAgo className="news-date small" :inverted="true" :date="feed.publicationDate" format="LL" :showTooltip="false" />
             </div>
-
-            <markdown class="markdown-tooltip mt-3 postParagraph" :source="feed.description" />
+            <KsMarkdown class="markdown-tooltip postParagraph" :content="feed.description" />
 
             <div class="newsButtonBar">
-                <el-button
+                <KsButton
                     style="flex:1"
                     @click="expanded[feed.id] = !expanded[feed.id]"
                 >
                     <MenuDown class="expandIcon" />
-                    {{ expanded[feed.id] ? t("showLess") : t("showMore") }}
-                </el-button>
-                <el-button
+                    {{ expanded[feed.id] ? $t("showLess") : $t("showMore") }}
+                </KsButton>
+                <KsButton
                     v-if="feed.href"
-                    :title="t('open in new tab')"
+                    :title="$t('open in new tab')"
                     tag="a"
                     type="primary"
                     target="_blank"
                     :href="feed.href"
                 >
                     <OpenInNew :title="feed.link" />
-                </el-button>
+                </KsButton>
             </div>
 
-            <el-divider v-if="index !== feeds.length - 1" />
+            <KsDivider class="mb-2" v-if="index !== feeds.length - 1" />
         </div>
-    </context-info-content>
+    </ContextInfoContent>
 </template>
 
-<script lang="ts" setup>
-    import {computed, onMounted, reactive} from "vue";
-    import {useStore} from "vuex";
-    import {useI18n} from "vue-i18n";
+<script setup lang="ts">
+    import {computed, onMounted, reactive, ref} from "vue"
     import {useStorage} from "@vueuse/core"
+    import {useScrollMemory} from "../../composables/useScrollMemory"
 
-    import OpenInNew from "vue-material-design-icons/OpenInNew.vue";
-    import MenuDown from "vue-material-design-icons/MenuDown.vue";
+    import OpenInNew from "vue-material-design-icons/OpenInNew.vue"
+    import MenuDown from "vue-material-design-icons/MenuDown.vue"
 
-    import Markdown from "./Markdown.vue";
-    import DateAgo from "./DateAgo.vue";
-    import ContextInfoContent from "../ContextInfoContent.vue";
+    import {KsMarkdown} from "@kestra-io/design-system"
+    import ContextInfoContent from "../ContextInfoContent.vue"
 
-    const store = useStore();
-    const {t} = useI18n();
+    import {useApiStore} from "../../stores/api"
 
-    const feeds = computed(() => store.state.api.feeds);
+    const apiStore = useApiStore()
 
-    const expanded = reactive({});
+    const contextInfoRef = ref<InstanceType<typeof ContextInfoContent> | null>(null)
+    const feeds = computed(() => apiStore.feeds)
+
+    const expanded = reactive<Record<string, boolean>>({})
 
     const lastNewsReadDate = useStorage<string | null>("feeds", null)
     onMounted(() => {
-        lastNewsReadDate.value = feeds.value[0].publicationDate;
-    });
+        lastNewsReadDate.value = feeds.value[0].publicationDate
+    })
+
+    const scrollableElement = computed(() => contextInfoRef.value?.contentRef || null)
+    useScrollMemory(ref("context-panel-news"), scrollableElement as any)
 </script>
 
-<style lang="scss" scoped>
+<style scoped lang="scss">
+    $post-line-height: 1.6;
+
     .post {
-        padding: var(--spacer);
+        padding: 1rem 1rem 0rem 1rem;
 
         h5 {
             margin-bottom: 0;
-            font-size: var(--font-size-lg);
+            font-size: var(--ks-font-size-lg);
         }
 
         img {
@@ -78,7 +90,7 @@
             max-width: 10rem;
             margin-right: 1rem;
             float: left;
-            border-radius: var(--border-radius-lg);
+            border-radius: var(--kel-border-radius-round);
         }
 
         .metaBlock {
@@ -91,22 +103,22 @@
         }
 
         hr {
-            border-top-color: var(--bs-gray-700);
-            margin-top: calc(var(--spacer) * 2);
-            margin-bottom: calc(var(--spacer) * 2);
+            border-top-color: var(--ks-border-primary);
+            margin-top: .5rem;
+            margin-bottom: .5rem;
         }
 
         .small {
-            font-size:  var(--font-size-sm);
+            font-size:  var(--ks-font-size-sm);
             opacity: 0.7;
         }
 
-        a.el-button {
+        a.kel-button {
             font-weight: bold;
         }
 
         .expandIcon {
-            margin-right:var(--spacer);
+            margin-right: 1rem;
         }
     }
 
@@ -116,8 +128,7 @@
 
     .lastPost{
         .postParagraph {
-            -webkit-line-clamp: 6;
-            line-clamp: 6;
+            max-height: calc(6 * #{$post-line-height}em);
         }
 
         img {
@@ -126,28 +137,26 @@
             float: none;
             max-width: none;
             max-height: none;
-            margin-bottom: var(--spacer)
+            margin-bottom: 1rem;
         }
     }
 
     .postParagraph {
-        display: -webkit-box;
-        -webkit-box-orient: vertical;
-        -webkit-line-clamp: 2;
-        line-clamp: 2;
+        max-height: calc(4 * #{$post-line-height}em);
         overflow: hidden;
-        line-height: 1.6;
+        line-height: $post-line-height;
         .expanded & {
-            -webkit-line-clamp: unset;
+            max-height: none;
+            overflow: visible;
         }
     }
 
     .newsButtonBar {
         display: flex;
-        margin-top: var(--spacer);
+        margin-top: 1rem;
     }
 
     :deep(.news-date) {
-        color: var(--bs-gray-700);
+        color: var(--ks-content-secondary);
     }
 </style>

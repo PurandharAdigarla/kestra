@@ -10,7 +10,7 @@
                 <div class="card-body d-flex align-items-center">
                     <span class="card-icon">
                         <img
-                            :src="$store.getters['doc/resourceUrl'](item.icon)"
+                            :src="docStore.resourceUrl(item.icon)"
                             :alt="item.title"
                             width="50px"
                             height="50px"
@@ -30,58 +30,65 @@
     </div>
 </template>
 
-<script setup>
-    import {useRoute} from "vue-router";
-    import {useStore} from "vuex";
+<script setup lang="ts">
+    import {computed, ref} from "vue"
+    import {useRoute} from "vue-router"
+    import {useDocStore} from "../../stores/doc"
 
-    const route = useRoute();
-    const store = useStore();
+    interface ResourceMetadata {
+        title: string;
+        description?: string;
+        icon?: string;
+        [key: string]: unknown;
+    }
 
-    const props = defineProps({
-        pageUrl: {
-            type: String,
-            default: undefined
+    const props = defineProps<{
+        pageUrl?: string;
+    }>()
+
+    const route = useRoute()
+    const docStore = useDocStore()
+
+    const currentPage = computed(() => {
+        const url = props.pageUrl ?? route.path
+        return url.replace(/^\/?(.*?)\/?$/, "$1")
+    })
+
+    const resourcesWithMetadata = ref<Record<string, ResourceMetadata>>({})
+    const parentMetadata = ref<Partial<ResourceMetadata>>({})
+
+    const parentLevel = computed(() => currentPage.value.split("/").length)
+
+    const navigation = computed(() =>
+        Object.entries(resourcesWithMetadata.value)
+            .filter(([path]) => path.split("/").length === parentLevel.value + 1)
+            .filter(([path]) => path !== currentPage.value)
+            .map(([path, metadata]) => ({
+                path,
+                ...parentMetadata.value,
+                ...metadata,
+            })),
+    );
+
+    (async () => {
+        resourcesWithMetadata.value = await docStore.children(currentPage.value)
+
+        if (props.pageUrl) {
+            parentMetadata.value = {...resourcesWithMetadata.value[currentPage.value]}
+            delete parentMetadata.value.description
         }
-    });
-
-    let currentPage = null;
-
-    if (props.pageUrl) {
-        currentPage = props.pageUrl;
-    } else {
-        currentPage = route.path;
-    }
-
-    currentPage = currentPage.replace(/^\/?(.*?)\/?$/, "$1");
-
-    const resourcesWithMetadata = await store.dispatch("doc/children", currentPage);
-    let parentMetadata;
-    if (props.pageUrl) {
-        parentMetadata = {...resourcesWithMetadata[currentPage]};
-        delete parentMetadata.description;
-    }
-
-    const parentLevel = currentPage.split("/").length;
-    const navigation = Object.entries(resourcesWithMetadata)
-        .filter(([path]) => path.split("/").length === parentLevel + 1)
-        .filter(([path]) => path !== currentPage)
-        .map(([path, metadata]) => ({
-            path,
-            ...parentMetadata,
-            ...metadata
-        }));
+    })()
 </script>
 
-<style lang="scss" scoped>
-    @import "@kestra-io/ui-libs/src/scss/variables";
+<style scoped lang="scss">
 
     .card-title {
-        font-size: $font-size-xl !important;
+        font-size: var(--ks-font-size-xl) !important;
         line-height: 1.375rem !important;
     }
 
     .card-text {
-        font-size: $font-size-sm !important;
+        font-size: var(--ks-font-size-sm) !important;
         line-height: 1rem !important;
     }
 

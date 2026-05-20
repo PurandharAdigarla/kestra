@@ -1,146 +1,143 @@
 <template>
-    <div v-if="!isNamespace && (isAllowedEdit || canDelete)" class="mx-2">
-        <el-dropdown>
-            <el-button type="default" :disabled="isReadOnly">
+    <div v-if="!isNamespace && (isAllowedEdit || canDelete)">
+        <KsDropdown>
+            <KsButton type="default" :disabled="isReadOnly">
                 <DotsVertical title="" />
                 {{ $t("actions") }}
-            </el-button>
+            </KsButton>
             <template #dropdown>
-                <el-dropdown-menu class="m-dropdown-menu">
-                    <el-dropdown-item
+                <KsDropdownMenu class="m-dropdown-menu">
+                    <KsDropdownItem
+                        v-if="isAllowedEdit"
+                        :icon="Download"
+                        size="large"
+                        @click="forwardEvent('export')"
+                    >
+                        {{ $t("flow_export") }}
+                    </KsDropdownItem>
+                    <KsDropdownItem
                         v-if="!isCreating && canDelete"
                         :icon="Delete"
                         size="large"
                         @click="forwardEvent('delete-flow', $event)"
                     >
                         {{ $t("delete") }}
-                    </el-dropdown-item>
+                    </KsDropdownItem>
 
-                    <el-dropdown-item
+                    <KsDropdownItem
                         v-if="!isCreating"
                         :icon="ContentCopy"
                         size="large"
                         @click="forwardEvent('copy', $event)"
                     >
                         {{ $t("copy") }}
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                        v-if="isAllowedEdit"
-                        :icon="Exclamation"
-                        size="large"
-                        @click="forwardEvent('open-new-error', null)"
-                        :disabled="!flowHaveTasks"
-                    >
-                        {{ $t("add global error handler") }}
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                        v-if="isAllowedEdit"
-                        :icon="LightningBolt"
-                        size="large"
-                        @click="forwardEvent('open-new-trigger', null)"
-                        :disabled="!flowHaveTasks"
-                    >
-                        {{ $t("add trigger") }}
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                        v-if="isAllowedEdit"
-                        :icon="FileEdit"
-                        size="large"
-                        @click="forwardEvent('open-edit-metadata', null)"
-                    >
-                        {{ $t("edit metadata") }}
-                    </el-dropdown-item>
-                </el-dropdown-menu>
+                    </KsDropdownItem>
+                </KsDropdownMenu>
             </template>
-        </el-dropdown>
+        </KsDropdown>
     </div>
-    <div>
-        <el-button
+    <div data-onboarding-target="flow-save-button">
+        <KsButton
+            v-if="isNamespace || isAllowedEdit"
             :icon="ContentSave"
-            @click="forwardEvent('save', $event)"
-            v-if="isAllowedEdit"
-            :type="buttonType"
-            :disabled="!haveChange && !isCreating"
+            @click="forwardEvent(showSaveAndExecute ? 'save-and-execute' : 'save', $event)"
+            :type="playgroundStore.enabled ? undefined : 'primary'"
+            :class="{
+                'el-button--playground': playgroundStore.enabled,
+                'onboarding-save-execute-button': showSaveAndExecute,
+            }"
+            :disabled="hasErrors || !canSave"
             class="edit-flow-save-button"
+            :id="showSaveAndExecute ? 'execute-button' : undefined"
         >
-            {{ $t("save") }}
-        </el-button>
+            {{ $t(showSaveAndExecute ? "save_and_execute" : "save") }}
+        </KsButton>
     </div>
 </template>
-<script setup>
-    import DotsVertical from "vue-material-design-icons/DotsVertical.vue";
-    import Delete from "vue-material-design-icons/Delete.vue";
-    import ContentCopy from "vue-material-design-icons/ContentCopy.vue";
-    import Exclamation from "vue-material-design-icons/Exclamation.vue";
-    import LightningBolt from "vue-material-design-icons/LightningBolt.vue";
-    import FileEdit from "vue-material-design-icons/FileEdit.vue";
-    import ContentSave from "vue-material-design-icons/ContentSave.vue";
-</script>
-<script>
-    import {defineComponent} from "vue";
+<script setup lang="ts">
+    import {computed} from "vue"
 
-    export default defineComponent({
-        emits: [
-            "delete-flow",
-            "copy",
-            "open-new-error",
-            "open-new-trigger",
-            "open-edit-metadata",
-            "save"
-        ],
-        props: {
-            isCreating: {
-                type: Boolean,
-                default: false
-            },
-            isReadOnly: {
-                type: Boolean,
-                default: false
-            },
-            canDelete: {
-                type: Boolean,
-                default: false
-            },
-            isAllowedEdit: {
-                type: Boolean,
-                default: false
-            },
-            haveChange: {
-                type: Boolean,
-                default: false
-            },
-            flowHaveTasks: {
-                type: Boolean,
-                default: false
-            },
-            errors: {
-                type: Array,
-                default: undefined
-            },
-            warnings: {
-                type: Array,
-                default: undefined
-            },
-            isNamespace: {
-                type: Boolean,
-                default: false
-            }
-        },
-        computed: {
-            buttonType() {
-                if (this.errors) {
-                    return "danger";
-                }
+    import DotsVertical from "vue-material-design-icons/DotsVertical.vue"
 
-                return this.warnings
-                    ? "warning"
-                    : "primary";
-            }
-        },
-        methods: {
-            forwardEvent(type, event) {
-                this.$emit(type, event);
-            }
-        }
+    import Delete from "vue-material-design-icons/Delete.vue"
+    import ContentCopy from "vue-material-design-icons/ContentCopy.vue"
+    import ContentSave from "vue-material-design-icons/ContentSave.vue"
+    import Download from "vue-material-design-icons/Download.vue"
+    import {usePlaygroundStore} from "../../stores/playground"
+
+    const playgroundStore = usePlaygroundStore()
+
+    const props = defineProps<{
+        isCreating: boolean;
+        isReadOnly: boolean;
+        canDelete: boolean;
+        isAllowedEdit: boolean;
+        haveChange: boolean;
+        flowHaveTasks: boolean;
+        errors: string[] | undefined;
+        warnings: string[] | undefined;
+        isNamespace: boolean;
+        showSaveAndExecute?: boolean;
+    }>()
+
+    const forwardEvent = defineEmits([
+        "delete-flow",
+        "copy",
+        "save",
+        "save-and-execute",
+        "export",
+    ])
+
+    const hasErrors = computed(() => props.errors && props.errors.length > 0)
+
+    const canSave = computed(() => {
+        return props.haveChange || props.isCreating
     })
 </script>
+
+<style scoped lang="scss">
+    .onboarding-save-execute-button {
+        position: relative;
+        z-index: 1;
+        animation: onboardingSaveExecutePulse 1s ease-in-out infinite alternate;
+        will-change: transform, box-shadow;
+    }
+
+    @keyframes onboardingSaveExecutePulse {
+        from {
+            transform: translateZ(0) scale(1);
+            box-shadow:
+                0 0 0 0 color-mix(in srgb, var(--ks-button-background-primary) 42%, transparent),
+                0 0 14px 4px color-mix(in srgb, var(--ks-button-background-primary) 28%, transparent);
+        }
+
+        to {
+            transform: translateZ(0) scale(1.04);
+            box-shadow:
+                0 0 0 8px color-mix(in srgb, var(--ks-button-background-primary) 12%, transparent),
+                0 0 22px 8px color-mix(in srgb, var(--ks-button-background-primary) 34%, transparent),
+                0 0 36px 14px color-mix(in srgb, var(--ks-button-background-primary) 20%, transparent);
+        }
+    }
+
+    :global(html.dark) .onboarding-save-execute-button {
+        animation-name: onboardingSaveExecutePulseDark;
+    }
+
+    @keyframes onboardingSaveExecutePulseDark {
+        from {
+            transform: translateZ(0) scale(1);
+            box-shadow:
+                0 0 0 0 color-mix(in srgb, var(--ks-button-background-primary) 54%, transparent),
+                0 0 16px 5px color-mix(in srgb, var(--ks-button-background-primary) 34%, transparent);
+        }
+
+        to {
+            transform: translateZ(0) scale(1.035);
+            box-shadow:
+                0 0 0 10px color-mix(in srgb, var(--ks-button-background-primary) 14%, transparent),
+                0 0 24px 9px color-mix(in srgb, var(--ks-button-background-primary) 40%, transparent),
+                0 0 42px 16px color-mix(in srgb, var(--ks-button-background-primary) 24%, transparent);
+        }
+    }
+</style>

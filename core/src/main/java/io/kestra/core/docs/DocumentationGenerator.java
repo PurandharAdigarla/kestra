@@ -1,18 +1,30 @@
 package io.kestra.core.docs;
 
-import com.google.common.base.Charsets;
+import java.io.IOException;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import org.apache.commons.io.IOUtils;
+
 import com.google.common.collect.ImmutableMap;
+
 import io.kestra.core.models.annotations.PluginSubGroup;
-import io.kestra.core.models.conditions.Condition;
-import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.models.tasks.Task;
+import io.kestra.core.models.tasks.logs.LogExporter;
+import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.models.triggers.AbstractTrigger;
+import io.kestra.core.plugins.AdditionalPlugin;
+import io.kestra.core.plugins.PluginClassAndMetadata;
 import io.kestra.core.plugins.RegisteredPlugin;
 import io.kestra.core.runners.pebble.Extension;
 import io.kestra.core.runners.pebble.JsonWriter;
 import io.kestra.core.runners.pebble.filters.*;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.Slugify;
+
 import io.pebbletemplates.pebble.PebbleEngine;
 import io.pebbletemplates.pebble.extension.AbstractExtension;
 import io.pebbletemplates.pebble.extension.Filter;
@@ -24,19 +36,12 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import org.apache.commons.io.IOUtils;
-
-import java.io.IOException;
-import java.io.Writer;
-import java.util.*;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
 
 @Singleton
 public class DocumentationGenerator {
-    private static PebbleEngine pebbleEngine;
+    private static final PebbleEngine PEBBLE_ENGINE;
 
     @Inject
     JsonSchemaGenerator jsonSchemaGenerator;
@@ -45,7 +50,7 @@ public class DocumentationGenerator {
         ClasspathLoader classpathLoader = new ClasspathLoader();
         classpathLoader.setPrefix("docs/");
 
-        pebbleEngine = new PebbleEngine.Builder()
+        PEBBLE_ENGINE = new PebbleEngine.Builder()
             .newLineTrimming(false)
             .loader(classpathLoader)
             .extension(new AbstractExtension() {
@@ -58,9 +63,11 @@ public class DocumentationGenerator {
             })
             .autoEscaping(false)
             .extension(new Extension())
+            .allowOverrideCoreOperators(true)
             .build();
     }
 
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public List<Document> generate(RegisteredPlugin registeredPlugin) throws Exception {
         ArrayList<Document> result = new ArrayList<>();
 
@@ -68,17 +75,17 @@ public class DocumentationGenerator {
 
         result.addAll(this.generate(registeredPlugin, registeredPlugin.getTasks(), Task.class, "tasks"));
         result.addAll(this.generate(registeredPlugin, registeredPlugin.getTriggers(), AbstractTrigger.class, "triggers"));
-        result.addAll(this.generate(registeredPlugin, registeredPlugin.getConditions(), Condition.class, "conditions"));
-        result.addAll(this.generate(registeredPlugin, registeredPlugin.getTaskRunners(), TaskRunner.class, "task-runners"));
+        result.addAll(this.generate(registeredPlugin, registeredPlugin.getTaskRunners(), (Class) TaskRunner.class, "task-runners"));
+        result.addAll(this.generate(registeredPlugin, registeredPlugin.getLogExporters(), (Class) LogExporter.class, "log-exporters"));
+        result.addAll(this.generate(registeredPlugin, registeredPlugin.getAdditionalPlugins(), AdditionalPlugin.class, "additional-plugins"));
 
         result.addAll(guides(registeredPlugin));
 
         return result;
     }
 
-    private static List<Document> index(RegisteredPlugin plugin) throws IOException {
+    public static List<Document> index(RegisteredPlugin plugin) throws IOException {
         Map<SubGroup, Map<String, List<ClassPlugin>>> groupedClass = DocumentationGenerator.indexGroupedClass(plugin);
-
 
         if (groupedClass.isEmpty()) {
             return Collections.emptyList();
@@ -107,16 +114,18 @@ public class DocumentationGenerator {
             builder.put("icon", plugin.icon("plugin-icon"));
         }
 
-        if(!plugin.getGuides().isEmpty()) {
+        if (!plugin.getGuides().isEmpty()) {
             builder.put("guides", plugin.getGuides());
         }
 
-        return Collections.singletonList(new Document(
-            docPath(plugin),
-            render("index", builder.build()),
-            plugin.icon("plugin-icon"),
-            null
-        ));
+        return Collections.singletonList(
+            new Document(
+                docPath(plugin),
+                render("index", builder.build()),
+                plugin.icon("plugin-icon"),
+                null
+            )
+        );
     }
 
     private static Map<SubGroup, Map<String, List<ClassPlugin>>> indexGroupedClass(RegisteredPlugin plugin) {
@@ -124,43 +133,47 @@ public class DocumentationGenerator {
             .entrySet()
             .stream()
             .filter(r -> !r.getKey().equals("controllers") && !r.getKey().equals("storages"))
-            .flatMap(entry -> entry.getValue()
-                .stream()
-                .map(cls -> {
-                    ClassPlugin.ClassPluginBuilder builder = ClassPlugin.builder()
-                        .name(cls.getName())
-                        .simpleName(cls.getSimpleName())
-                        .type(entry.getKey());
-                    if (cls.getPackageName().startsWith(plugin.group())) {
-                        var pluginSubGroup = cls.getPackage().getDeclaredAnnotation(PluginSubGroup.class);
-                        var subGroupName =  cls.getPackageName().length() > plugin.group().length() ?
-                            cls.getPackageName().substring(plugin.group().length() + 1) : "";
-                        var subGroupTitle = pluginSubGroup != null ? pluginSubGroup.title() : subGroupName;
-                        var subGroupDescription = pluginSubGroup != null ? pluginSubGroup.description() : null;
-                        // hack to avoid adding the subgroup in the task URL when it's the group to keep search engine indexes
-                        var subgroupIsGroup = cls.getPackageName().length() <= plugin.group().length();
-                        var subGroupIcon = plugin.icon(cls.getPackageName());
-                        var subgroup = new SubGroup(subGroupName, subGroupTitle, subGroupDescription, subGroupIcon, subgroupIsGroup);
-                        builder.subgroup(subgroup);
-                    } else {
-                        // should never occur
-                        builder.subgroup(new SubGroup(""));
-                    }
+            .flatMap(
+                entry -> entry.getValue()
+                    .stream()
+                    .map(cls ->
+                    {
+                        ClassPlugin.ClassPluginBuilder builder = ClassPlugin.builder()
+                            .name(cls.getName())
+                            .simpleName(cls.getSimpleName())
+                            .type(entry.getKey());
+                        if (cls.getPackageName().startsWith(plugin.group())) {
+                            var pluginSubGroup = cls.getPackage().getDeclaredAnnotation(PluginSubGroup.class);
+                            var subGroupName = cls.getPackageName().length() > plugin.group().length() ? cls.getPackageName().substring(plugin.group().length() + 1) : "";
+                            var subGroupTitle = pluginSubGroup != null ? pluginSubGroup.title() : subGroupName;
+                            var subGroupDescription = pluginSubGroup != null ? pluginSubGroup.description() : null;
+                            // hack to avoid adding the subgroup in the task URL when it's the group to keep search engine indexes
+                            var subgroupIsGroup = cls.getPackageName().length() <= plugin.group().length();
+                            var subGroupIcon = plugin.icon(cls.getPackageName());
+                            var subgroup = new SubGroup(subGroupName, subGroupTitle, subGroupDescription, subGroupIcon, subgroupIsGroup);
+                            builder.subgroup(subgroup);
+                        } else {
+                            // should never occur
+                            builder.subgroup(new SubGroup(""));
+                        }
 
-                    return builder.build();
-                }))
+                        return builder.build();
+                    })
+            )
             .filter(Objects::nonNull)
             .distinct()
-            .sorted(Comparator.comparing(ClassPlugin::getSubgroup)
-                .thenComparing(ClassPlugin::getType)
-                .thenComparing(ClassPlugin::getName)
+            .sorted(
+                Comparator.comparing(ClassPlugin::getSubgroup)
+                    .thenComparing(ClassPlugin::getType)
+                    .thenComparing(ClassPlugin::getName)
             )
-            .collect(Collectors.groupingBy(
-                ClassPlugin::getSubgroup,
-                Collectors.groupingBy(classPlugin -> Slugify.toStartCase(classPlugin.getType()))
-            ));
+            .collect(
+                Collectors.groupingBy(
+                    ClassPlugin::getSubgroup,
+                    Collectors.groupingBy(classPlugin -> Slugify.toStartCase(classPlugin.getType()))
+                )
+            );
     }
-
 
     @AllArgsConstructor
     @Getter
@@ -176,7 +189,7 @@ public class DocumentationGenerator {
     @AllArgsConstructor
     @Getter
     @EqualsAndHashCode(of = "name")
-    public static class SubGroup implements Comparable<SubGroup>{
+    public static class SubGroup implements Comparable<SubGroup> {
         String name;
         String title;
         String description;
@@ -201,20 +214,34 @@ public class DocumentationGenerator {
             .guides()
             .entrySet()
             .stream()
-            .map(throwFunction(e -> new Document(
-                pluginName + "/guides/" + e.getKey()  + ".md",
-                e.getValue(),
-                null,
-                null
-            )))
+            .map(
+                throwFunction(
+                    e -> new Document(
+                        pluginName + "/guides/" + e.getKey() + ".md",
+                        e.getValue(),
+                        null,
+                        null
+                    )
+                )
+            )
             .toList();
     }
 
     private <T> List<Document> generate(RegisteredPlugin registeredPlugin, List<Class<? extends T>> cls, Class<T> baseCls, String type) {
         return cls
             .stream()
-            .map(r -> ClassPluginDocumentation.of(jsonSchemaGenerator, registeredPlugin, r, baseCls))
-            .map(pluginDocumentation -> {
+            .map(pluginClass ->
+            {
+                PluginClassAndMetadata<T> metadata = PluginClassAndMetadata.create(
+                    registeredPlugin,
+                    pluginClass,
+                    baseCls,
+                    null
+                );
+                return ClassPluginDocumentation.of(jsonSchemaGenerator, metadata, registeredPlugin.version(), true);
+            })
+            .map(pluginDocumentation ->
+            {
                 try {
                     return new Document(
                         docPath(registeredPlugin, type, pluginDocumentation),
@@ -243,21 +270,21 @@ public class DocumentationGenerator {
             classPluginDocumentation.getCls() + ".md";
     }
 
-    public static <T> String render(ClassPluginDocumentation<T> classPluginDocumentation) throws IOException {
+    public static String render(ClassPluginDocumentation<?> classPluginDocumentation) throws IOException {
         return render("task", JacksonMapper.toMap(classPluginDocumentation));
     }
 
-    public static <T> String render(AbstractClassDocumentation<T> classInputDocumentation) throws IOException {
+    public static String render(AbstractClassDocumentation classInputDocumentation) throws IOException {
         return render("task", JacksonMapper.toMap(classInputDocumentation));
     }
 
-    public static <T> String render(String templateName, Map<String, Object> vars) throws IOException {
+    public static String render(String templateName, Map<String, Object> vars) throws IOException {
         String pebbleTemplate = IOUtils.toString(
             Objects.requireNonNull(DocumentationGenerator.class.getClassLoader().getResourceAsStream("docs/" + templateName + ".peb")),
-            Charsets.UTF_8
+            StandardCharsets.UTF_8
         );
 
-        PebbleTemplate compiledTemplate = pebbleEngine.getLiteralTemplate(pebbleTemplate);
+        PebbleTemplate compiledTemplate = PEBBLE_ENGINE.getLiteralTemplate(pebbleTemplate);
 
         Writer writer = new JsonWriter();
         compiledTemplate.evaluate(writer, vars);

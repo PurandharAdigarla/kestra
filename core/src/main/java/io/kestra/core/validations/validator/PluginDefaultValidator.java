@@ -1,30 +1,28 @@
 package io.kestra.core.validations.validator;
 
-import io.kestra.core.models.flows.PluginDefault;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+import io.kestra.core.models.flows.PluginDefaultSpec;
 import io.kestra.core.services.PluginDefaultService;
+import io.kestra.core.validations.PluginDefaultValidation;
+
 import io.micronaut.core.annotation.AnnotationValue;
-import io.micronaut.core.annotation.Introspected;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.validation.validator.constraints.ConstraintValidator;
 import io.micronaut.validation.validator.constraints.ConstraintValidatorContext;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import io.kestra.core.validations.PluginDefaultValidation;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
 
 @Singleton
-@Introspected
-public class PluginDefaultValidator implements ConstraintValidator<PluginDefaultValidation, PluginDefault> {
+public class PluginDefaultValidator implements ConstraintValidator<PluginDefaultValidation, PluginDefaultSpec> {
     @Inject
     private PluginDefaultService pluginDefaultService;
 
     @Override
-    public boolean isValid(@Nullable PluginDefault value, @NonNull AnnotationValue<PluginDefaultValidation> annotationMetadata, @NonNull ConstraintValidatorContext context) {
+    public boolean isValid(@Nullable PluginDefaultSpec value, @NonNull AnnotationValue<PluginDefaultValidation> annotationMetadata, @NonNull ConstraintValidatorContext context) {
         if (value == null) {
             return false;
         }
@@ -49,7 +47,7 @@ public class PluginDefaultValidator implements ConstraintValidator<PluginDefault
         }
 
         List<String> strings = pluginDefaultService.validateDefault(value);
-        if(!strings.isEmpty()) {
+        if (!strings.isEmpty()) {
             violations.addAll(strings);
         }
 
@@ -62,7 +60,7 @@ public class PluginDefaultValidator implements ConstraintValidator<PluginDefault
     }
 
     private static void addConstraintViolation(final ConstraintValidatorContext context,
-                                               final List<String> violations) {
+        final List<String> violations) {
         context.disableDefaultConstraintViolation();
         context.buildConstraintViolationWithTemplate("Invalid Plugin Default: " + String.join(", ", violations))
             .addConstraintViolation();

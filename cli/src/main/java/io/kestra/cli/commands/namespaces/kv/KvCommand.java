@@ -1,15 +1,15 @@
 package io.kestra.cli.commands.namespaces.kv;
 
 import io.kestra.cli.AbstractCommand;
-import io.kestra.cli.App;
-import io.micronaut.configuration.picocli.PicocliRunner;
+import io.kestra.cli.Kestra;
+
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine;
 
 @CommandLine.Command(
     name = "kv",
-    description = "handle KV Store",
+    description = "Manage KV Store",
     mixinStandardHelpOptions = true,
     subcommands = {
         KvUpdateCommand.class,
@@ -22,8 +22,6 @@ public class KvCommand extends AbstractCommand {
     public Integer call() throws Exception {
         super.call();
 
-        PicocliRunner.call(App.class, "namespace", "kv",  "--help");
-
-        return 0;
+        return Kestra.runCli(new String[] { "namespace", "kv", "--help" });
     }
 }

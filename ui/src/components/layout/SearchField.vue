@@ -1,10 +1,10 @@
 <template>
-    <el-input
-        data-component="FILENAME_PLACEHOLDER"
+    <KsInput
         v-model="search"
         @input="onInput"
         :placeholder="$t(placeholder)"
         :readonly="readonly"
+        clearable
     >
         <template #prefix>
             <slot name="prefix" />
@@ -12,85 +12,90 @@
         <template #suffix>
             <div class="shortcut d-flex">
                 <slot name="suffix">
-                    <magnify />
+                    <Magnify />
                 </slot>
             </div>
         </template>
-    </el-input>
+    </KsInput>
 </template>
-<script>
-    import {debounce} from "throttle-debounce";
-    import Magnify from "vue-material-design-icons/Magnify.vue";
 
-    export default {
-        emits: ["search"],
-        components: {Magnify},
-        searchDebounce: undefined,
-        created() {
-            this.init();
-        },
-        props: {
-            router: {
-                type: Boolean,
-                default: true
-            },
-            placeholder: {
-                type: String,
-                required: false,
-                default: "search"
-            },
-            readonly: {
-                type: Boolean
-            }
-        },
-        watch: {
-            $route(newValue, oldValue) {
-                if (oldValue.name === newValue.name) {
-                    this.init()
-                }
-            }
-        },
-        data() {
-            return {
-                search: ""
-            };
-        },
-        methods: {
-            init() {
-                if (this.$route.query.q && this.router) {
-                    this.search = this.$route.query.q;
-                }
-                this.searchDebounce = debounce(300, () => {
-                    this.$emit("search", this.search);
+<script lang="ts" setup>
+    import {ref, watch, onMounted, onUnmounted} from "vue"
+    import {useRoute, useRouter} from "vue-router"
+    import debounce from "lodash/debounce"
+    import Magnify from "vue-material-design-icons/Magnify.vue"
 
-                    if (this.router) {
-                        const query = {...this.$route.query, q: this.search, page: 1};
-                        if (!this.search) {
-                            delete query.q;
-                        }
-                        this.$router.push({query});
-                    }
-                });
-            },
-            onInput() {
-                this.searchDebounce();
-            },
-        },
-        unmounted() {
-            this.searchDebounce && this.searchDebounce.cancel();
+    const props = withDefaults(defineProps<{
+        router?: boolean;
+        placeholder?: string;
+        readonly?: boolean;
+    }>(), {
+        router: true,
+        placeholder: "search",
+        readonly: false,
+    })
+
+    const emit = defineEmits<{
+        (e: "search", value: string): void;
+    }>()
+
+    const route = useRoute()
+    const vueRouter = useRouter()
+
+    const search = ref<string>("")
+
+    let searchDebounce: ReturnType<typeof debounce>
+
+    function init() {
+        if (route.query.q && props.router !== false) {
+            search.value = String(route.query.q)
         }
-    };
-</script>
-<style lang="scss" scoped>
-    .shortcut {
-        font-size: 0.75rem;
-        line-height: 1.25rem;
-        gap: calc(var(--spacer) / 4);
+        searchDebounce = debounce(() => {
+            emit("search", search.value)
+            if (props.router !== false) {
+                const query: Record<string, any> = {
+                    ...route.query,
+                    q: search.value,
+                    page: 1,
+                }
+                if (!search.value) {
+                    delete query.q
+                }
+                vueRouter.push({query})
+            }
+        }, 300)
     }
 
-    .el-input {
-        :deep(.el-input__prefix), :deep(input)::placeholder {
-            color: var(--bs-body-color);
+    function onInput() {
+        searchDebounce()
+    }
+
+    onMounted(() => {
+        init()
+    })
+
+    onUnmounted(() => {
+        if (searchDebounce) searchDebounce.cancel()
+    })
+
+    watch(
+        () => route.query.q,
+        (newQ) => {
+            search.value = newQ ? String(newQ) : ""
+        },
+    )
+</script>
+
+<style scoped lang="scss">
+    .shortcut {
+        font-size: var(--ks-font-size-xs);
+        line-height: 1.25rem;
+        gap: .25rem;
+    }
+
+    .kel-input {
+        :deep(.kel-input__prefix), :deep(input)::placeholder {
+            color: var(--ks-content-primary);
         }
     }
 </style>

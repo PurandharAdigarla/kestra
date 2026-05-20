@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
+import io.kestra.core.models.property.Property;
 
 /**
  * Interface for the commands passed to a TaskRunner.
@@ -19,9 +20,17 @@ public interface TaskCommands {
 
     AbstractLogConsumer getLogConsumer();
 
-    List<String> getCommands();
+    Property<List<String>> getInterpreter();
+
+    Property<List<String>> getBeforeCommands();
+
+    Property<List<String>> getCommands();
 
     Map<String, Object> getAdditionalVars();
+
+    default String outputDirectoryName() {
+        return this.getWorkingDirectory().relativize(this.getOutputDirectory()).toString();
+    }
 
     Path getWorkingDirectory();
 

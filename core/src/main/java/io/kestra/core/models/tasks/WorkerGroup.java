@@ -1,20 +1,23 @@
 package io.kestra.core.models.tasks;
 
-import io.kestra.core.validations.WorkerGroupValidation;
-import io.micronaut.core.annotation.Introspected;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import jakarta.validation.constraints.Pattern;
-
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-@Introspected
-@WorkerGroupValidation
 public class WorkerGroup {
-    @Pattern(regexp="^[a-zA-Z0-9][a-zA-Z0-9_-]*")
+
+    /**
+     * Reserved routing key for tasks marked with {@link SystemTask}.
+     * <p>Worker groups with this key cannot be created by users; the key is
+     * always reported as available so that {@code SystemTask} jobs are
+     * dispatched to the SystemWorker hosted in the webserver / standalone
+     * process.</p>
+     */
+    public static final String SYSTEM_KEY = "system";
+
     private String key;
 
     private Fallback fallback;
@@ -23,5 +26,26 @@ public class WorkerGroup {
         FAIL,
         WAIT,
         CANCEL,
+    }
+
+    /**
+     * Format worker group for log display
+     *
+     * @param workerGroup the worker group
+     * @return formatted worker group
+     */
+    public static String forLog(String workerGroup) {
+        return isDefault(workerGroup) ? "(default)" : workerGroup;
+    }
+
+    /**
+     * A worker-group key refers to the default (unnamed) worker group when it is
+     * {@code null} or blank.
+     *
+     * @param key the worker-group key to test
+     * @return {@code true} when the key refers to the default worker group
+     */
+    public static boolean isDefault(String key) {
+        return key == null || key.isBlank();
     }
 }

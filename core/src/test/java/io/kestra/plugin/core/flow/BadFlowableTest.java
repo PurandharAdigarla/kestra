@@ -1,34 +1,39 @@
 package io.kestra.plugin.core.flow;
 
-import io.kestra.core.models.executions.Execution;
-import io.kestra.core.models.executions.TaskRun;
-import io.kestra.core.models.flows.State;
-import io.kestra.core.queues.QueueException;
-import io.kestra.core.runners.AbstractMemoryRunnerTest;
-import io.kestra.core.serializers.JacksonMapper;
+import io.kestra.core.repositories.ExecutionRepositoryInterface;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
-import java.util.concurrent.TimeoutException;
-import java.util.stream.Collectors;
+import io.kestra.core.junit.annotations.ExecuteFlow;
+import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.executions.Execution;
+import io.kestra.core.models.flows.State;
+import io.kestra.core.serializers.JacksonMapper;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
-public class BadFlowableTest extends AbstractMemoryRunnerTest {
+@KestraTest(startRunner = true)
+public class BadFlowableTest {
+    @Inject
+    private ExecutionRepositoryInterface executionRepository;
+
     @Test
-    void sequential() throws TimeoutException, QueueException {
-        Execution execution = runnerUtils.runOne(null, "io.kestra.tests", "bad-flowable");
-
-        assertThat("Task runs were: \n"+ JacksonMapper.log(execution.getTaskRunList()), execution.getTaskRunList().size(), greaterThanOrEqualTo(2));
-        assertThat(execution.getState().getCurrent(), is(State.Type.FAILED));
+    @ExecuteFlow(value = "flows/valids/flowable-fail.yaml", tenantId = "sequential")
+    void sequential(Execution execution) {
+        assertThat(execution.getTaskRunList().size()).as("Task runs were: \n" + JacksonMapper.log(execution.getTaskRunList())).isGreaterThanOrEqualTo(2);
+        assertThat(execution.getState().getCurrent()).isEqualTo(State.Type.FAILED);
+        assertThat(execution.getTaskRunList().getFirst().getState().getCurrent()).isEqualTo(State.Type.FAILED);
+        assertThat(execution.getTaskRunList().getFirst().getAttempts().getFirst().getState().getCurrent()).isEqualTo(State.Type.FAILED);
     }
 
-    @Test // this test is a non-reg for an infinite loop in the executor
-    void flowableWithParentFail() throws TimeoutException, QueueException {
-        Execution execution = runnerUtils.runOne(null, "io.kestra.tests", "flowable-with-parent-fail");
+    @Test
+    @ExecuteFlow(value = "flows/valids/flowable-with-parent-fail.yaml", tenantId = "flowablewithparentfail")
+    void flowableWithParentFail(Execution execution) {
+        assertThat(execution.getTaskRunList()).hasSize(1);
+        assertThat(execution.getState().getCurrent()).isEqualTo(State.Type.FAILED);
 
-        assertThat(execution.getTaskRunList(), hasSize(5));
-        assertThat(execution.getState().getCurrent(), is(State.Type.FAILED));
+        var subExecutions = executionRepository.findLoopSubExecutions(execution.getTenantId(), execution.getId());
+        assertThat(subExecutions).hasSize(2);
+        assertThat(subExecutions).extracting("state.current").containsOnly(State.Type.FAILED);
     }
 }

@@ -1,13 +1,12 @@
 <template>
-    <el-row :gutter="24" class="row">
+    <KsRow :gutter="24" class="row">
         <slot />
-    </el-row>
+    </KsRow>
 </template>
 
 <style scoped lang="scss">
-@import "@kestra-io/ui-libs/src/scss/variables.scss";
 
 .row {
-    margin-bottom: $spacer;
+    margin-bottom: 1rem;
 }
 </style>

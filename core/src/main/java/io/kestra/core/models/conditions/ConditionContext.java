@@ -1,16 +1,14 @@
 package io.kestra.core.models.conditions;
 
-import lombok.*;
-import io.kestra.core.models.executions.Execution;
-import io.kestra.core.models.flows.Flow;
-import io.kestra.core.models.triggers.multipleflows.MultipleConditionStorageInterface;
-import io.kestra.core.runners.RunContext;
-
-import io.micronaut.core.annotation.Nullable;
-
 import java.util.HashMap;
 import java.util.Map;
+
+import io.kestra.core.models.executions.Execution;
+import io.kestra.core.models.flows.FlowInterface;
+import io.kestra.core.runners.RunContext;
+
 import jakarta.validation.constraints.NotNull;
+import lombok.*;
 
 @Builder
 @Getter
@@ -18,7 +16,7 @@ import jakarta.validation.constraints.NotNull;
 @AllArgsConstructor
 public class ConditionContext {
     @NotNull
-    private Flow flow;
+    private FlowInterface flow;
 
     private Execution execution;
 
@@ -29,7 +27,4 @@ public class ConditionContext {
     @With
     @Builder.Default
     private final Map<String, Object> variables = new HashMap<>();
-
-    @Nullable
-    private MultipleConditionStorageInterface multipleConditionStorage;
 }

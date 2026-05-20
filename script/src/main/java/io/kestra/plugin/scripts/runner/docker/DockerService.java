@@ -1,18 +1,5 @@
 package io.kestra.plugin.scripts.runner.docker;
 
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.core.DockerClientBuilder;
-import com.github.dockerjava.core.DockerClientConfig;
-import com.github.dockerjava.core.NameParser;
-import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
-import com.github.dockerjava.transport.DockerHttpClient;
-import io.kestra.core.exceptions.IllegalVariableEvaluationException;
-import io.kestra.core.runners.RunContext;
-import io.kestra.core.serializers.JacksonMapper;
-import io.kestra.core.utils.MapUtils;
-import org.apache.commons.lang3.SystemUtils;
-
-import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -22,7 +9,26 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang3.SystemUtils;
+
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.core.DefaultDockerClientConfig;
+import com.github.dockerjava.core.DockerClientBuilder;
+import com.github.dockerjava.core.DockerClientConfig;
+import com.github.dockerjava.core.NameParser;
+import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
+import com.github.dockerjava.transport.DockerHttpClient;
+
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.runners.RunContext;
+import io.kestra.core.serializers.JacksonMapper;
+import io.kestra.core.utils.MapUtils;
+
+import jakarta.annotation.Nullable;
+
 public class DockerService {
+    static final String DOCKER_HUB_CANONICAL_URL = "https://index.docker.io/v1/";
+
     public static DockerClient client(DockerClientConfig dockerClientConfig) {
         DockerHttpClient dockerHttpClient = new ApacheDockerHttpClient.Builder()
             .dockerHost(dockerClientConfig.getDockerHost())
@@ -50,8 +56,30 @@ public class DockerService {
         return "unix:///dind/docker.sock";
     }
 
+    public static DockerClient client(RunContext runContext, @Nullable String host, @Nullable Object config, @Nullable Credentials credentials, @Nullable String image)
+        throws IOException, IllegalVariableEvaluationException {
+        DefaultDockerClientConfig.Builder dockerClientConfigBuilder = DefaultDockerClientConfig.createDefaultConfigBuilder()
+            .withDockerHost(DockerService.findHost(runContext, host));
+
+        if (config != null || credentials != null) {
+            Path configPath = DockerService.createConfig(
+                runContext,
+                config,
+                credentials != null ? List.of(credentials) : null,
+                image
+            );
+
+            dockerClientConfigBuilder.withDockerConfig(configPath.toFile().getAbsolutePath());
+        }
+
+        DockerClientConfig dockerClientConfig = dockerClientConfigBuilder.build();
+
+        return DockerService.client(dockerClientConfig);
+    }
+
     @SuppressWarnings("unchecked")
-    public static Path createConfig(RunContext runContext, @Nullable Object config, @Nullable List<Credentials> credentials, @Nullable String image) throws IllegalVariableEvaluationException, IOException {
+    public static Path createConfig(RunContext runContext, @Nullable Object config, @Nullable List<Credentials> credentials, @Nullable String image)
+        throws IllegalVariableEvaluationException, IOException {
         Map<String, Object> finalConfig = new HashMap<>();
 
         if (config != null) {
@@ -64,31 +92,31 @@ public class DockerService {
 
         if (credentials != null) {
             Map<String, Object> auths = new HashMap<>();
-            String registry = "https://index.docker.io/v1/";
+            String registry = DOCKER_HUB_CANONICAL_URL;
 
             for (Credentials c : credentials) {
                 if (c.getUsername() != null) {
-                    auths.put("username", runContext.render(c.getUsername()));
+                    auths.put("username", runContext.render(c.getUsername()).as(String.class).orElse(null));
                 }
 
                 if (c.getPassword() != null) {
-                    auths.put("password", runContext.render(c.getPassword()));
+                    auths.put("password", runContext.render(c.getPassword()).as(String.class).orElse(null));
                 }
 
                 if (c.getRegistryToken() != null) {
-                    auths.put("registrytoken", runContext.render(c.getRegistryToken()));
+                    auths.put("registrytoken", runContext.render(c.getRegistryToken()).as(String.class).orElse(null));
                 }
 
                 if (c.getIdentityToken() != null) {
-                    auths.put("identitytoken", runContext.render(c.getIdentityToken()));
+                    auths.put("identitytoken", runContext.render(c.getIdentityToken()).as(String.class).orElse(null));
                 }
 
                 if (c.getAuth() != null) {
-                    auths.put("auth", runContext.render(c.getAuth()));
+                    auths.put("auth", runContext.render(c.getAuth()).as(String.class).orElse(null));
                 }
 
                 if (c.getRegistry() != null) {
-                    registry = runContext.render(c.getRegistry());
+                    registry = normalizeRegistryUrl(runContext.render(c.getRegistry()).as(String.class).orElse(null));
                 } else if (image != null) {
                     String renderedImage = runContext.render(image);
                     String detectedRegistry = registryUrlFromImage(renderedImage);
@@ -117,6 +145,39 @@ public class DockerService {
         );
 
         return docker.toPath().getParent();
+    }
+
+    /**
+     * Normalizes a registry URL so that Docker Hub endpoints map to the canonical
+     * {@code https://index.docker.io/v1/} key expected by the Docker daemon, and
+     * other registries have the unnecessary {@code /v2/} path stripped.
+     */
+    static String normalizeRegistryUrl(String registry) {
+        if (registry == null) {
+            return null;
+        }
+
+        // Strip trailing slashes for uniform comparison
+        var normalized = registry.replaceAll("/+$", "");
+
+        // Detect any Docker Hub endpoint (with or without scheme) and map to canonical key
+        var withoutScheme = normalized.replaceFirst("^https?://", "");
+        if (
+            withoutScheme.equals("registry-1.docker.io/v2")
+                || withoutScheme.equals("registry-1.docker.io")
+                || withoutScheme.equals("index.docker.io/v1")
+                || withoutScheme.equals("index.docker.io/v2")
+                || withoutScheme.equals("index.docker.io")
+        ) {
+            return DOCKER_HUB_CANONICAL_URL;
+        }
+
+        // For any other registry, strip a trailing /v2 path
+        if (normalized.endsWith("/v2")) {
+            normalized = normalized.substring(0, normalized.length() - "/v2".length());
+        }
+
+        return normalized;
     }
 
     public static String registryUrlFromImage(String image) {

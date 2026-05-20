@@ -1,23 +1,21 @@
 package io.kestra.core.runners;
 
-import io.micronaut.context.ApplicationContext;
-import io.micronaut.context.annotation.Value;
-import jakarta.annotation.PostConstruct;
-import jakarta.inject.Inject;
-import jakarta.inject.Singleton;
-import lombok.Getter;
-
 import java.util.AbstractMap;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import io.micronaut.context.ApplicationContext;
+import jakarta.annotation.PostConstruct;
+import jakarta.inject.Inject;
+import jakarta.inject.Singleton;
+import io.kestra.core.runners.configuration.VariableConfiguration;
+import lombok.Getter;
+
 @Singleton
 public class RunContextCache {
-    // List of env variables that should be redacted from the execution run context variables to avoid information disclosure.
-    @Value("${kestra.variables.redacted-env-vars:KESTRA_PLUGINS_PATH,KESTRA_CONFIGURATION_PATH,KESTRA_CONFIGURATION}")
-    private List<String> redactedEnvVar;
+    @Inject
+    private VariableConfiguration variableConfiguration;
 
     @Inject
     private ApplicationContext applicationContext;
@@ -30,7 +28,7 @@ public class RunContextCache {
 
     @PostConstruct
     void init() {
-        String envPrefix = applicationContext.getProperty("kestra.variables.env-vars-prefix", String.class, "KESTRA_");
+        String envPrefix = applicationContext.getProperty("kestra.variables.env-vars-prefix", String.class, "ENV_");
         envVars = this.envVariables(envPrefix);
 
         globalVars = applicationContext
@@ -38,7 +36,7 @@ public class RunContextCache {
             .orElseGet(Map::of);
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     private Map<String, String> envVariables(String envPrefix) {
         Map<String, String> result = new HashMap<>(System.getenv());
         result.putAll((Map) System.getProperties());
@@ -46,11 +44,13 @@ public class RunContextCache {
         return result
             .entrySet()
             .stream()
-            .filter(e -> !redactedEnvVar.contains(e.getKey()) && e.getKey().startsWith(envPrefix))
-            .map(e -> new AbstractMap.SimpleEntry<>(
-                e.getKey().substring(envPrefix.length()).toLowerCase(),
-                e.getValue()
-            ))
+            .filter(e -> !variableConfiguration.getRedactedEnvVars().contains(e.getKey()) && e.getKey().startsWith(envPrefix))
+            .map(
+                e -> new AbstractMap.SimpleEntry<>(
+                    e.getKey().substring(envPrefix.length()).toLowerCase(),
+                    e.getValue()
+                )
+            )
             .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 }

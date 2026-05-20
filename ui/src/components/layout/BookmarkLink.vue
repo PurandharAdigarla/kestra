@@ -1,49 +1,68 @@
 <template>
-    <div class="wrapper">
-        <div v-if="editing" class="inputs">
-            <el-input ref="titleInput" v-model="updatedTitle" @keyup.enter="renameBookmark" @keyup.esc="editing = false" />
+    <div class="wrapper vsm--item" :class="{editing}">
+        <div v-if="editing" class="edit-row">
+            <KsInput
+                class="vsm--input"
+                ref="titleInput"
+                v-model="updatedTitle"
+                @keyup.enter="renameBookmark"
+                @keyup.esc="editing = false"
+            />
             <CheckCircle @click.stop="renameBookmark" class="save" />
         </div>
-        <div class="buttons">
-            <PencilOutline @click="startEditBookmark" :title="t('edit')" />
-            <DeleteOutline @click="deleteBookmark" :title="t('delete')" />
-        </div>
-        <a :href="href" :title="updatedTitle">
-            {{ updatedTitle }}
-        </a>
+        <template v-else>
+            <a
+                class="vsm--link vsm--link_level-2"
+                :href="href"
+                :title="updatedTitle"
+            >
+                <div class="vsm--title">
+                    <span>{{ updatedTitle }}</span>
+                </div>
+                <div class="buttons">
+                    <PencilOutline
+                        @click.stop.prevent="startEditBookmark"
+                        :title="$t('edit')"
+                    />
+                    <DeleteOutline
+                        @click.prevent="deleteBookmark"
+                        :title="$t('delete')"
+                    />
+                </div>
+            </a>
+        </template>
     </div>
 </template>
 
-<script lang="ts" setup>
+<script setup lang="ts">
     import {nextTick, ref} from "vue"
-    import {useI18n} from "vue-i18n";
-    import {useStore} from "vuex";
-    import DeleteOutline from "vue-material-design-icons/DeleteOutline.vue";
-    import PencilOutline from "vue-material-design-icons/PencilOutline.vue";
-    import CheckCircle from "vue-material-design-icons/CheckCircle.vue";
-    import {ElMessageBox} from "element-plus";
+    import {useI18n} from "vue-i18n"
+    import DeleteOutline from "vue-material-design-icons/DeleteOutline.vue"
+    import PencilOutline from "vue-material-design-icons/PencilOutline.vue"
+    import CheckCircle from "vue-material-design-icons/CheckCircle.vue"
+    import {KsMessageBox} from "@kestra-io/design-system"
+    import {useBookmarksStore} from "../../stores/bookmarks"
 
-    const {t} = useI18n();
-
-    const $store = useStore()
+    const {t} = useI18n({useScope: "global"})
 
     const props = defineProps<{
         href: string
         title: string
     }>()
+    const bookmarksStore = useBookmarksStore()
 
     const editing = ref(false)
     const updatedTitle = ref(props.title)
-    const titleInput = ref<{focus: () => void, select: () => void} | null>(null)
+    const titleInput = ref<{ focus: () => void; select: () => void } | null>(null)
 
     function deleteBookmark() {
-        ElMessageBox.confirm(t("remove_bookmark"), t("confirmation"), {
+        KsMessageBox.confirm(t("remove_bookmark"), t("confirmation"), {
             type: "warning",
             confirmButtonText: t("ok"),
             cancelButtonText: t("close"),
         }).then(() => {
-            $store.dispatch("bookmarks/remove", {path: props.href});
-        });
+            bookmarksStore.remove({path: props.href})
+        })
     }
 
     function startEditBookmark() {
@@ -53,75 +72,78 @@
             titleInput.value?.select()
         })
     }
-
     function renameBookmark() {
-        $store.dispatch("bookmarks/rename", {
+        bookmarksStore.rename({
             path: props.href,
-            label: updatedTitle.value
+            label: updatedTitle.value,
         })
         editing.value = false
     }
 </script>
 
 <style scoped>
-    .wrapper{
-        position: relative;
-        .buttons {
-            color: var(--el-text-color-regular);
-            position: absolute;
-            z-index: 1;
-            top: 0;
-            right: calc(.15 * var(--spacer));
-            display: none;
-            gap: calc(.5 * var(--spacer));
-            background-color: var(--el-bg-color);
-            padding: calc(.35 * var(--spacer));
-            > span{
-                cursor: pointer;
-            }
-        }
-        &:hover .buttons {
-            display: flex;
-        }
+.wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 0.25rem 0.5rem;
+    overflow: hidden;
+    border-radius: 0.25rem;
+    box-sizing: border-box;
+}
 
-        .inputs{
-            width: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 2;
-            --el-input-height:18px;
-            .el-input {
-                font-size: 0.875em;
-                &:deep(.el-input__wrapper) {
-                    padding: 1px 8px;
-                }
-            }
+.buttons {
+    position: absolute;
+    right: 2rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    gap: 0.25rem;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease;
+    z-index: 10;
+}
 
-            .save {
-                position: absolute;
-                top: calc(.5 * var(--spacer));
-                right: calc(.5 * var(--spacer));
-                z-index: 2;
-                color: var(--el-text-color-regular);
-                cursor: pointer;
-            }
-        }
-    }
-    a {
-        display: block;
-        padding: calc(.25 * var(--spacer)) calc(.5 * var(--spacer));
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: var(--el-text-color-regular);
-        font-size: 0.875em;
-        border-radius: 4px;
-        &:hover{
-            color: var(--el-text-color-secondary);
-            background-color: var(--el-bg-color);
-        }
-    }
+.vsm--input {
+    flex: 1;
+    font-size: var(--ks-font-size-sm);
+}
 
+.edit-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 0.5rem;
+}
 
+.save {
+    cursor: pointer;
+    color: var(--ks-content-primary);
+}
+
+.vsm--link {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    max-width: 100%;
+    width: 100%;
+    text-decoration: none;
+    color: var(--ks-content-primary);
+    font-size: var(--ks-font-size-sm);
+}
+
+.wrapper:not(.editing) .vsm--link:hover .buttons {
+    margin-right: 1rem;
+    opacity: 1;
+    visibility: visible;
+}
+
+.vsm--title {
+    overflow: hidden;
+    white-space: nowrap;
+    padding: 0.25rem 0.5rem;
+    text-overflow: ellipsis;
+    max-width: calc(100% - 2.5rem);
+}
 </style>

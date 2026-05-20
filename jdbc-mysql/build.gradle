@@ -1,19 +1,25 @@
- publishSonatypePublicationPublicationToSonatypeRepository.enabled = false
-
- configurations {
-     compileClasspath.extendsFrom(micronaut)
- }
+configurations {
+    implementation.extendsFrom(micronaut)
+}
 
 dependencies {
     implementation project(":core")
     implementation project(":jdbc")
+    implementation project(":executor")
+    implementation project(":scheduler")
+    implementation project(":queue")
+    implementation project(":queue-jdbc")
 
     implementation("io.micronaut.sql:micronaut-jooq")
-    runtimeOnly("mysql:mysql-connector-java")
-    runtimeOnly('org.flywaydb:flyway-mysql')
+    runtimeOnly("com.mysql:mysql-connector-j")
 
     testImplementation project(':core').sourceSets.test.output
     testImplementation project(':jdbc').sourceSets.test.output
+    testImplementation project(':executor').sourceSets.test.output
+    testImplementation project(':scheduler').sourceSets.test.output
     testImplementation project(':storage-local')
+    testImplementation project(':indexer')
     testImplementation project(':tests')
+    testImplementation project(':queue').sourceSets.test.output
+    testImplementation("io.micronaut.validation:micronaut-validation") // MysqlServiceLivenessCoordinatorTest fail to init without that
 }

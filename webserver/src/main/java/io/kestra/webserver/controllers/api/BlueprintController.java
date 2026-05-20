@@ -1,9 +1,18 @@
 package io.kestra.webserver.controllers.api;
 
+import java.net.URISyntaxException;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
+
+import io.kestra.core.utils.Enums;
 import io.kestra.core.utils.VersionProvider;
 import io.kestra.webserver.responses.PagedResults;
-import io.micronaut.core.annotation.Introspected;
+
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.type.Argument;
 import io.micronaut.http.HttpRequest;
@@ -15,7 +24,6 @@ import io.micronaut.http.client.annotation.Client;
 import io.micronaut.http.uri.UriBuilder;
 import io.micronaut.scheduling.TaskExecutors;
 import io.micronaut.scheduling.annotation.ExecuteOn;
-import io.micronaut.validation.Validated;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.inject.Inject;
@@ -25,79 +33,79 @@ import lombok.experimental.FieldDefaults;
 import lombok.experimental.SuperBuilder;
 import lombok.extern.jackson.Jacksonized;
 
-import java.net.URISyntaxException;
-import java.time.Instant;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
-@Validated
-@Controller("/api/v1/blueprints/community")
+@Controller("/api/v1/{tenant}/blueprints/community")
 public class BlueprintController {
     @Inject
     @Client("api")
     private HttpClient httpClient;
-
     @Inject
     protected VersionProvider versionProvider;
 
     @SuppressWarnings("unchecked")
     @ExecuteOn(TaskExecutors.IO)
-    @Get
-    @Operation(tags = {"Blueprints"}, summary = "List all blueprints")
-    public PagedResults<BlueprintItem> blueprints(
+    @Get("/{kind}")
+    @Operation(tags = { "Blueprints" }, summary = "List all blueprints")
+    public PagedResults<ApiBlueprintItem> searchBlueprints(
         @Parameter(description = "A string filter") @Nullable @QueryValue(value = "q") Optional<String> q,
         @Parameter(description = "The sort of current page") @Nullable @QueryValue(value = "sort") Optional<String> sort,
         @Parameter(description = "A tags filter") @Nullable @QueryValue(value = "tags") Optional<List<String>> tags,
         @Parameter(description = "The current page") @QueryValue(defaultValue = "1") @Min(1) Integer page,
         @Parameter(description = "The current page size") @QueryValue(defaultValue = "1") @Min(1) Integer size,
-        HttpRequest<?> httpRequest
-    ) throws URISyntaxException {
-        return fastForwardToKestraApi(httpRequest, "/v1/blueprints/versions/" + versionProvider.getVersion(), Map.of("ee", false), Argument.of(PagedResults.class, BlueprintItem.class));
+        @Parameter(description = "The blueprint kind") Kind kind,
+        HttpRequest<?> httpRequest) throws URISyntaxException {
+        return fastForwardToKestraApi(httpRequest, getApiBasePath(kind), Map.of("ee", false), Argument.of(PagedResults.class, ApiBlueprintItem.class));
     }
 
     @ExecuteOn(TaskExecutors.IO)
-    @Get(value = "{id}/flow", produces = "application/yaml")
-    @Operation(tags = {"Blueprints"}, summary = "Get a blueprint flow")
-    public String blueprintFlow(
+    @Get(value = "/{kind}/{id}/source", produces = "application/yaml")
+    @Operation(tags = { "Blueprints" }, summary = "Get a blueprint flow")
+    public String getBlueprintSource(
         @Parameter(description = "The blueprint id") String id,
-        HttpRequest<?> httpRequest
-    ) throws URISyntaxException {
-        return fastForwardToKestraApi(httpRequest, "/v1/blueprints/" + id + "/versions/" + versionProvider.getVersion() + "/flow", Argument.of(String.class));
+        @Parameter(description = "The blueprint kind") Kind kind,
+        HttpRequest<?> httpRequest) throws URISyntaxException {
+        return fastForwardToKestraApi(httpRequest, getApiBasePath(id, kind) + "/source", Argument.of(String.class));
     }
 
     @ExecuteOn(TaskExecutors.IO)
-    @Get(value = "{id}/graph")
-    @Operation(tags = {"Blueprints"}, summary = "Get a blueprint graph")
-    public Map<String, Object> blueprintGraph(
+    @Get(value = "/{kind}/{id}/graph")
+    @Operation(tags = { "Blueprints" }, summary = "Get a blueprint graph")
+    public Map<String, Object> getBlueprintGraph(
         @Parameter(description = "The blueprint id") String id,
-        HttpRequest<?> httpRequest
-    ) throws URISyntaxException {
-        return fastForwardToKestraApi(httpRequest, "/v1/blueprints/" + id + "/versions/" + versionProvider.getVersion() + "/graph", Argument.mapOf(String.class, Object.class));
+        @Parameter(description = "The blueprint kind") Kind kind,
+        HttpRequest<?> httpRequest) throws URISyntaxException {
+        return fastForwardToKestraApi(httpRequest, getApiBasePath(id, kind) + "/graph", Argument.mapOf(String.class, Object.class));
     }
 
     @ExecuteOn(TaskExecutors.IO)
-    @Get(value = "{id}")
-    @Operation(tags = {"Blueprints"}, summary = "Get a blueprint")
-    public BlueprintItemWithFlow blueprint(
+    @Get(value = "/{kind}/{id}")
+    @Operation(tags = { "Blueprints" }, summary = "Get a blueprint")
+    public ApiBlueprintItemWithSource getBlueprint(
         @Parameter(description = "The blueprint id") String id,
-        HttpRequest<?> httpRequest
-    ) throws URISyntaxException {
-        return fastForwardToKestraApi(httpRequest, "/v1/blueprints/" + id + "/versions/" + versionProvider.getVersion(), Argument.of(BlueprintItemWithFlow.class));
+        @Parameter(description = "The blueprint kind") Kind kind,
+        HttpRequest<?> httpRequest) throws URISyntaxException {
+        return fastForwardToKestraApi(httpRequest, getApiBasePath(id, kind), Argument.of(ApiBlueprintItemWithSource.class));
     }
 
     @SuppressWarnings("unchecked")
     @ExecuteOn(TaskExecutors.IO)
-    @Get("tags")
-    @Operation(tags = {"Blueprint Tags"}, summary = "List blueprint tags matching the filter")
-    public List<BlueprintTagItem> blueprintTags(
+    @Get("/{kind}/tags")
+    @Operation(tags = { "Blueprint Tags" }, summary = "List blueprint tags matching the filter")
+    public List<ApiBlueprintTagItem> listBlueprintTags(
+        @Parameter(description = "The blueprint kind") Kind kind,
         @Parameter(description = "A string filter to get tags with matching blueprints only") @Nullable @QueryValue(value = "q") Optional<String> q,
-        HttpRequest<?> httpRequest
-    ) throws URISyntaxException {
-        return fastForwardToKestraApi(httpRequest, "/v1/blueprints/versions/" + versionProvider.getVersion() + "/tags", Argument.of(List.class, BlueprintTagItem.class));
+        HttpRequest<?> httpRequest) throws URISyntaxException {
+        return fastForwardToKestraApi(httpRequest, getApiBasePath(kind) + "/tags", Argument.of(List.class, ApiBlueprintTagItem.class));
     }
 
-    protected  <T> T fastForwardToKestraApi(HttpRequest<?> originalRequest, String newPath, Argument<T> returnType) throws URISyntaxException {
+    private String getApiBasePath(final Kind kind) {
+        return "/v1/blueprints/kinds/" + kind.val() + "/versions/" + versionProvider.getVersion();
+    }
+
+    private String getApiBasePath(final String id, final Kind kind) {
+        return "/v1/blueprints/kinds/" + kind.val() + "/" + id + "/versions/" + versionProvider.getVersion();
+    }
+
+    protected <T> T fastForwardToKestraApi(HttpRequest<?> originalRequest, String newPath, Argument<T> returnType) throws URISyntaxException {
         return this.fastForwardToKestraApi(originalRequest, newPath, null, returnType);
     }
 
@@ -124,11 +132,11 @@ public class BlueprintController {
     }
 
     @Value
-    @SuperBuilder
+    @SuperBuilder(toBuilder = true)
     @Jacksonized
-    @Introspected
-    public static class BlueprintItemWithFlow extends BlueprintItem {
-        String flow;
+    public static class ApiBlueprintItemWithSource extends ApiBlueprintItem {
+        String source;
+        Kind kind;
     }
 
     @ToString
@@ -136,10 +144,9 @@ public class BlueprintController {
     @AllArgsConstructor
     @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
     @Getter
-    @SuperBuilder
+    @SuperBuilder(toBuilder = true)
     @Jacksonized
-    @Introspected
-    public static class BlueprintItem {
+    public static class ApiBlueprintItem {
         String id;
         String title;
         String description;
@@ -153,11 +160,25 @@ public class BlueprintController {
     @Value
     @Builder
     @Jacksonized
-    @Introspected
-    public static class BlueprintTagItem {
+    public static class ApiBlueprintTagItem {
         String id;
         String name;
         @Builder.Default
         Instant publishedAt = Instant.now();
+    }
+
+    public enum Kind {
+        APP,
+        DASHBOARD,
+        FLOW;
+
+        public String val() {
+            return name().toLowerCase();
+        }
+
+        @JsonCreator
+        public Kind from(String s) {
+            return Enums.getForNameIgnoreCase(s, Kind.class);
+        }
     }
 }

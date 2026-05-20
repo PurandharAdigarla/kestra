@@ -1,5 +1,8 @@
 package io.kestra.core.models.tasks;
 
+import java.util.List;
+import java.util.Optional;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.Execution;
@@ -9,20 +12,24 @@ import io.kestra.core.models.flows.State;
 import io.kestra.core.models.hierarchies.AbstractGraph;
 import io.kestra.core.runners.FlowableUtils;
 import io.kestra.core.runners.RunContext;
-import io.swagger.v3.oas.annotations.media.Schema;
 
-import java.util.List;
-import java.util.Optional;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * Interface for tasks that orchestrate other tasks. Those tasks are handled by the Executor.
  */
-public interface FlowableTask <T extends Output> {
+public interface FlowableTask<T extends Output> {
     @Schema(
         title = "List of tasks to run if any tasks failed on this FlowableTask."
     )
     @PluginProperty
     List<Task> getErrors();
+
+    @Schema(
+        title = "List of tasks to run after any tasks failed or success on this FlowableTask."
+    )
+    @PluginProperty
+    List<Task> getFinally();
 
     /**
      * Create the topology representation of a flowable task.
@@ -40,7 +47,7 @@ public interface FlowableTask <T extends Output> {
     /**
      * Resolve child tasks of a flowable task.
      * <p>
-     * For a normal flowable, it should be the list of its tasks, for an iterative flowable (such as EachSequential, ForEachItem, ...),
+     * For a normal flowable, it should be the list of its tasks, for an iterative flowable (such as EachSequential, ...),
      * it should be the list of its tasks for all iterations.
      */
     List<ResolvedTask> childTasks(RunContext runContext, TaskRun parentTaskRun) throws IllegalVariableEvaluationException;
@@ -48,7 +55,7 @@ public interface FlowableTask <T extends Output> {
     /**
      * Resolve next tasks to run for an execution.
      * <p>
-     * For a normal flowable, it should be <b>the</b> subsequent task, for a parallel flowable (such as Parallel, ForEachItem, ...),
+     * For a normal flowable, it should be <b>the</b> subsequent task, for a parallel flowable (such as Parallel, ...),
      * it should be a list of the next subsequent tasks of the size of the concurrency of the task.
      */
     List<NextTaskRun> resolveNexts(RunContext runContext, Execution execution, TaskRun parentTaskRun) throws IllegalVariableEvaluationException;
@@ -71,6 +78,7 @@ public interface FlowableTask <T extends Output> {
             execution,
             this.childTasks(runContext, parentTaskRun),
             FlowableUtils.resolveTasks(this.getErrors(), parentTaskRun),
+            FlowableUtils.resolveTasks(this.getFinally(), parentTaskRun),
             parentTaskRun,
             runContext,
             isAllowFailure(),

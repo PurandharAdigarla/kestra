@@ -1,6 +1,25 @@
 configurations {
     implementation.extendsFrom(micronaut)
 }
+
+tasks.register('runLocal', JavaExec) {
+    group = "application"
+    description = "Run Kestra as server local"
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = "io.kestra.cli.Kestra"
+    environment 'MICRONAUT_ENVIRONMENTS', 'override'
+    args 'server', 'local', '--plugins', '../local/plugins'
+}
+
+tasks.register('runStandalone', JavaExec) {
+    group = "application"
+    description = "Run Kestra as server standalone"
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = "io.kestra.cli.Kestra"
+    environment 'MICRONAUT_ENVIRONMENTS', 'override'
+    args 'server', 'standalone', '--plugins', '../local/plugins'
+}
+
 dependencies {
     // micronaut
     implementation "info.picocli:picocli"
@@ -12,18 +31,9 @@ dependencies {
     implementation 'ch.qos.logback.contrib:logback-json-classic'
     implementation 'ch.qos.logback.contrib:logback-jackson'
 
-    // plugins
-    implementation 'org.eclipse.aether:aether-api'
-    implementation 'org.eclipse.aether:aether-spi'
-    implementation 'org.eclipse.aether:aether-util'
-    implementation 'org.eclipse.aether:aether-impl'
-    implementation 'org.eclipse.aether:aether-connector-basic'
-    implementation 'org.eclipse.aether:aether-transport-file'
-    implementation 'org.eclipse.aether:aether-transport-http'
-    implementation('org.apache.maven:maven-aether-provider') {
-        // sisu dependency injector is not used
-        exclude group: 'org.eclipse.sisu'
-    }
+    // OTLP metrics
+    implementation "io.micronaut.micrometer:micronaut-micrometer-registry-otlp"
+
     // aether still use javax.inject
     compileOnly 'javax.inject:javax.inject:1'
 
@@ -40,7 +50,20 @@ dependencies {
     implementation project(":jdbc-mysql")
     implementation project(":jdbc-postgres")
 
+    implementation project(":queue")
+    implementation project(":queue-jdbc")
+
     implementation project(":storage-local")
 
+    // Kestra server components
+    implementation project(":executor")
+    implementation project(":scheduler")
     implementation project(":webserver")
+    implementation project(":worker")
+    implementation project(":worker-controller")
+    implementation project(":indexer")
+
+    //test
+    testImplementation project(':tests')
+    testImplementation "org.wiremock:wiremock-jetty12"
 }

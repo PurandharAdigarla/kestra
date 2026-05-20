@@ -1,20 +1,18 @@
 package io.kestra.cli.commands.namespaces;
 
 import io.kestra.cli.AbstractCommand;
-import io.kestra.cli.App;
-import io.kestra.cli.commands.namespaces.files.NamespaceFilesCommand;
+import io.kestra.cli.Kestra;
+
 import io.kestra.cli.commands.namespaces.kv.KvCommand;
-import io.micronaut.configuration.picocli.PicocliRunner;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine;
 
 @CommandLine.Command(
     name = "namespace",
-    description = "handle namespaces",
+    description = "Manage namespaces",
     mixinStandardHelpOptions = true,
     subcommands = {
-        NamespaceFilesCommand.class,
         KvCommand.class
     }
 )
@@ -25,8 +23,6 @@ public class NamespaceCommand extends AbstractCommand {
     public Integer call() throws Exception {
         super.call();
 
-        PicocliRunner.call(App.class, "namespace", "--help");
-
-        return 0;
+        return Kestra.runCli(new String[] { "namespace", "--help" });
     }
 }

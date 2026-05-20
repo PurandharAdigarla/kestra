@@ -1,0 +1,54 @@
+<template>
+    <section v-if="data" id="kpi">
+        <span class="pb-2">{{ getChartTitle(props.chart!) }}</span>
+        <p class="m-0 fs-2 fw-bold">
+            {{ getPropertyValue(data, "value") }}{{ percentageShown ? "%" : "" }}
+        </p>
+    </section>
+
+    <KsEmpty v-else :description="EMPTY_TEXT" />
+</template>
+
+<script setup lang="ts">
+    import {PropType, watch} from "vue"
+
+    import {Chart} from "../composables/useDashboards"
+    import {getChartTitle, getPropertyValue, useChartGenerator} from "../composables/useDashboards"
+
+    import {useRoute} from "vue-router"
+    import {FilterObject} from "../../../utils/filters"
+
+    const props = defineProps({
+        dashboardId: {type: String, required: false, default: undefined},
+        chart: {type: Object as PropType<Chart>, required: true},
+        filters: {type: Array as PropType<FilterObject[]>, default: () => []},
+        showDefault: {type: Boolean, default: false},
+    })
+
+    const route = useRoute()
+    const {percentageShown, EMPTY_TEXT, data, generate} = useChartGenerator(props.dashboardId, {...props})
+
+    function refresh() {
+        return generate()
+    }
+
+    defineExpose({
+        refresh,
+    })
+
+    watch(() => route.params.filters, () => {
+        refresh()
+    }, {deep: true})
+</script>
+
+<style scoped lang="scss">
+
+section#kpi {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
+</style>

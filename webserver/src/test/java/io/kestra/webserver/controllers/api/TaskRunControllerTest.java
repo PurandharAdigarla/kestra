@@ -1,19 +1,21 @@
 package io.kestra.webserver.controllers.api;
 
-import io.kestra.webserver.controllers.h2.JdbcH2ControllerTest;
+import org.junit.jupiter.api.Test;
+
+import io.kestra.core.junit.annotations.KestraTest;
+
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpStatus;
 import io.micronaut.http.client.annotation.Client;
 import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.reactor.http.client.ReactorHttpClient;
 import jakarta.inject.Inject;
-import org.junit.jupiter.api.Test;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.is;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-class TaskRunControllerTest extends JdbcH2ControllerTest {
+@KestraTest
+class TaskRunControllerTest {
     @Inject
     @Client("/")
     private ReactorHttpClient client;
@@ -22,19 +24,9 @@ class TaskRunControllerTest extends JdbcH2ControllerTest {
     void search() {
         HttpClientResponseException e = assertThrows(
             HttpClientResponseException.class,
-            () -> client.toBlocking().retrieve(HttpRequest.GET("/api/v1/taskruns/search"))
+            () -> client.toBlocking().retrieve(HttpRequest.GET("/api/v1/main/taskruns/search"))
         );
 
-        assertThat(e.getStatus(), is(HttpStatus.NOT_FOUND));
-    }
-
-    @Test
-    void maxTaskRunSetting() {
-        HttpClientResponseException e = assertThrows(
-            HttpClientResponseException.class,
-            () -> client.toBlocking().retrieve(HttpRequest.GET("/api/v1/taskruns/maxTaskRunSetting"))
-        );
-
-        assertThat(e.getStatus(), is(HttpStatus.NOT_FOUND));
+        assertThat(e.getStatus().getCode()).isEqualTo(HttpStatus.NOT_FOUND.getCode());
     }
 }

@@ -1,6 +1,5 @@
 package io.kestra.core.utils;
 
-import java.util.concurrent.Callable;
 import java.util.function.*;
 
 public final class Rethrow {
@@ -45,7 +44,8 @@ public final class Rethrow {
     }
 
     public static <T, E extends Exception> Consumer<T> throwConsumer(ConsumerChecked<T, E> consumer) throws E {
-        return t -> {
+        return t ->
+        {
             try {
                 consumer.accept(t);
             } catch (Exception exception) {
@@ -55,7 +55,8 @@ public final class Rethrow {
     }
 
     public static <K, V, E extends Exception> BiConsumer<K, V> throwBiConsumer(BiConsumerChecked<K, V, E> consumer) throws E {
-        return (k, v) -> {
+        return (k, v) ->
+        {
             try {
                 consumer.accept(k, v);
             } catch (Exception exception) {
@@ -65,7 +66,8 @@ public final class Rethrow {
     }
 
     public static <T, E extends Exception> Supplier<T> throwSupplier(SupplierChecked<T, E> supplier) throws E {
-        return () -> {
+        return () ->
+        {
             try {
                 return supplier.get();
             } catch (Exception exception) {
@@ -75,7 +77,8 @@ public final class Rethrow {
     }
 
     public static <T, E extends Exception> Predicate<T> throwPredicate(PredicateChecked<T, E> consumer) throws E {
-        return t -> {
+        return t ->
+        {
             try {
                 return consumer.test(t);
             } catch (Exception exception) {
@@ -85,7 +88,8 @@ public final class Rethrow {
     }
 
     public static <T, R, E extends Exception> Function<T, R> throwFunction(FunctionChecked<T, R, E> function) throws E {
-        return t -> {
+        return t ->
+        {
             try {
                 return function.apply(t);
             } catch (Exception exception) {
@@ -95,7 +99,8 @@ public final class Rethrow {
     }
 
     public static <A, B, R, E extends Exception> BiFunction<A, B, R> throwBiFunction(BiFunctionChecked<A, B, R, E> function) throws E {
-        return (a, b) -> {
+        return (a, b) ->
+        {
             try {
                 return function.apply(a, b);
             } catch (Exception exception) {
@@ -105,21 +110,12 @@ public final class Rethrow {
     }
 
     public static <E extends Exception> Runnable throwRunnable(RunnableChecked<E> runnable) throws E {
-        return () -> {
+        return () ->
+        {
             try {
                 runnable.run();
             } catch (Exception exception) {
                 throwException(exception);
-            }
-        };
-    }
-
-    public static <R, E extends Exception> Callable<R> throwCallable(CallableChecked<R, E> runnable) throws E {
-        return () -> {
-            try {
-                return runnable.call();
-            } catch (Exception exception) {
-                return throwException(exception);
             }
         };
     }

@@ -1,299 +1,300 @@
 <template>
-    <nav>
-        <collapse>
-            <el-form-item>
-                <el-select
-                    :model-value="$route.query.task"
-                    filterable
-                    :persistent="false"
-                    :placeholder="$t('task')"
-                    clearable
-                    @update:model-value="updateQuery({'task': $event})"
-                >
-                    <el-option
-                        v-for="item in tasksWithMetrics"
-                        :key="item"
-                        :label="item"
-                        :value="item"
-                    >
-                        {{ item }}
-                    </el-option>
-                </el-select>
-            </el-form-item>
-            <el-form-item>
-                <el-select
-                    :model-value="$route.query.metric"
-                    filterable
-                    :clearable="true"
-                    :persistent="false"
-                    :placeholder="$t('metric')"
-                    @update:model-value="updateQuery({'metric': $event})"
-                >
-                    <el-option
-                        v-for="item in metrics"
-                        :key="item"
-                        :label="item"
-                        :value="item"
-                    >
-                        {{ item }}
-                    </el-option>
-                </el-select>
-            </el-form-item>
-            <el-form-item>
-                <el-select
-                    :model-value="$route.query.aggregation"
-                    filterable
-                    :clearable="true"
-                    :persistent="false"
-                    :placeholder="$t('aggregation')"
-                    @update:model-value="updateQuery({'aggregation': $event})"
-                >
-                    <el-option
-                        v-for="item in ['sum','avg','min','max']"
-                        :key="item"
-                        :label="$t(item)"
-                        :value="item"
-                    />
-                </el-select>
-            </el-form-item>
-            <el-form-item>
-                <date-filter
-                    @update:is-relative="onDateFilterTypeChange"
-                    @update:filter-value="updateQuery"
+    <KSFilter
+        :configuration="flowMetricFilter"
+        :prefix="'flow-metrics'"
+        :tableOptions="{
+            chart: {shown: false},
+            columns: {shown: false},
+            refresh: {shown: true, callback: load}
+        }"
+        :buttons="{savedFilters: {shown: false}, tableOptions: {shown: false}}"
+        :defaultScope="false"
+        :defaultTimeRange="false"
+    >
+        <template #extra>
+            <div class="metric-controls">
+                <KsSegmented
+                    :modelValue="currentAggregation"
+                    :options="aggregationOptions"
+                    @change="setAggregation"
                 />
-            </el-form-item>
-            <el-form-item>
-                <refresh-button @refresh="load" :can-auto-refresh="canAutoRefresh" />
-            </el-form-item>
-        </collapse>
-    </nav>
+                <KsSegmented
+                    :modelValue="currentChartType"
+                    :options="chartTypeOptions"
+                    @change="setChartType"
+                />
+            </div>
+        </template>
+    </KSFilter>
 
-    <div v-bind="$attrs" v-loading="isLoading">
-        <el-card>
-            <el-tooltip
-                effect="light"
-                placement="bottom"
-                :persistent="false"
-                :hide-after="0"
-                transition=""
-                :popper-class="tooltipContent === '' ? 'd-none' : 'tooltip-stats'"
-                v-if="aggregatedMetric"
+    <div v-bind="$attrs">
+        <KsRow v-if="displayedMetrics.length > 0" :gutter="16">
+            <KsCol
+                :md="12"
+                :lg="8"
+                v-for="metric in displayedMetrics"
+                :key="metric"
             >
-                <template #content>
-                    <span v-html="tooltipContent" />
-                </template>
-                <Bar ref="chartRef" :data="chartData" :options="options" v-if="aggregatedMetric" />
-            </el-tooltip>
-            <span v-else>
-                <el-alert type="info" :closable="false">
-                    {{ $t("metric choice") }}
-                </el-alert>
-            </span>
-        </el-card>
+                <KsCard class="metric-chart-card">
+                    <div class="metric-title">
+                        {{ metric }}
+                    </div>
+                    <KsBar
+                        v-if="currentChartType === 'bar'"
+                        class="chart"
+                        :data="getSeriesData(metric)"
+                        :categories="getCategories(metric)"
+                        :loading="isLoading"
+                    />
+                    <KsLine
+                        v-else
+                        class="chart"
+                        :data="getSeriesData(metric)"
+                        :categories="getCategories(metric)"
+                        :loading="isLoading"
+                    />
+                </KsCard>
+            </KsCol>
+        </KsRow>
+        <KsCard v-else-if="!isLoading">
+            <KsAlert type="info" :closable="false">
+                {{ $t("metric choice") }}
+            </KsAlert>
+        </KsCard>
     </div>
 </template>
 
-<script>
-    import {Bar} from "vue-chartjs";
-    import {mapState} from "vuex";
-    import moment from "moment";
-    import {defaultConfig, getFormat, tooltip} from "../../utils/charts";
-    import {cssVariable} from "@kestra-io/ui-libs/src/utils/global";
-    import Collapse from "../layout/Collapse.vue";
-    import DateFilter from "../executions/date-select/DateFilter.vue";
-    import RefreshButton from "../layout/RefreshButton.vue";
+<script setup lang="ts">
+    import {ref, computed, watch} from "vue"
+    import {useRoute, useRouter} from "vue-router"
+    import moment from "moment"
+    import {useI18n} from "vue-i18n"
+    import {useFlowStore} from "../../stores/flow"
+    import {getFormat} from "../dashboard/composables/charts"
+    import {cssVar, KsBar, KsLine, KsSegmented} from "@kestra-io/design-system"
+    import type {KsChartSeriesItem} from "@kestra-io/design-system"
+    import {KsFilter as KSFilter} from "@kestra-io/design-system"
+    import {useFlowMetricFilter} from "../filter/configurations"
 
-    export default {
+    defineOptions({
         name: "FlowMetrics",
-        components: {
-            Collapse,
-            Bar,
-            DateFilter,
-            RefreshButton
-        },
-        created() {
-            this.loadMetrics();
-        },
-        computed: {
-            ...mapState("flow", ["flow", "metrics", "aggregatedMetric","tasksWithMetrics"]),
-            theme() {
-                return localStorage.getItem("theme") || "light";
-            },
-            xGrid() {
-                return this.theme === "light" ?
-                    {}
-                    : {
-                        borderColor: "#404559",
-                        color: "#404559"
-                    }
-            },
-            yGrid() {
-                return this.theme === "light" ?
-                    {}
-                    : {
-                        borderColor: "#404559",
-                        color: "#404559"
-                    }
-            },
-            chartData() {
-                return {
-                    labels: this.aggregatedMetric.aggregations.map(e => moment(e.date).format(getFormat(this.aggregatedMetric.groupBy))),
-                    datasets: [
-                        !this.display ? [] : {
-                            label: this.$t(this.$route.query.aggregation.toLowerCase()) + " " + this.$t("of") + " " + this.$route.query.metric,
-                            backgroundColor: cssVariable("--el-color-success"),
-                            borderRadius: 4,
-                            data: this.aggregatedMetric.aggregations.map(e => e.value ? e.value : 0)
-                        }
-                    ]
-                };
-            },
-            options() {
-                const darken = this.theme === "light" ? cssVariable("--bs-gray-700") : cssVariable("--bs-gray-800");
-                const lighten = this.theme === "light" ? cssVariable("--bs-gray-200") : cssVariable("--bs-gray-400");
+        inheritAttrs: false,
+    })
 
-                return defaultConfig({
-                    plugins: {
-                        tooltip: {
-                            external: (context) => {
-                                this.tooltipContent = tooltip(context.tooltip);
-                            },
-                        }
-                    },
-                    scales: {
-                        x: {
-                            display: true,
-                            grid: {
-                                borderColor: lighten,
-                                color: lighten,
-                                drawTicks: false
-                            },
-                            ticks: {
-                                color: darken,
-                                autoSkip: true,
-                                minRotation: 0,
-                                maxRotation: 0,
-                            }
-                        },
-                        y: {
-                            display: true,
-                            grid: {
-                                borderColor: lighten,
-                                color: lighten,
-                                drawTicks: false
-                            },
-                            ticks: {
-                                color: darken
-                            }
-                        }
-                    }
-                })
-            },
-            display() {
-                return this.$route.query.metric && this.$route.query.aggregation;
-            },
-            endDate() {
-                if (this.$route.query.endDate) {
-                    return this.$route.query.endDate;
-                }
-                return undefined;
-            },
-            startDate() {
-                // This allow to force refresh this computed property especially when using timeRange
-                this.refreshDates;
-                if (this.$route.query.startDate) {
-                    return this.$route.query.startDate;
-                }
-                if (this.$route.query.timeRange) {
-                    return this.$moment().subtract(this.$moment.duration(this.$route.query.timeRange).as("milliseconds")).toISOString(true);
-                }
+    const route = useRoute()
+    const router = useRouter()
+    const {t} = useI18n()
 
-                // the default is PT30D
-                return this.$moment().subtract(30, "days").toISOString(true);
-            }
-        },
-        data() {
-            return {
-                tooltipContent: undefined,
-                isLoading: false,
-                canAutoRefresh: false,
-                refreshDates: false
-            }
-        },
-        methods: {
-            onDateFilterTypeChange(event) {
-                this.canAutoRefresh = event;
-            },
-            loadQuery(base) {
-                return {
-                    ...base,
-                    startDate: this.startDate,
-                    endDate: this.endDate
-                }
-            },
-            loadMetrics() {
-                this.$store.dispatch("flow/loadTasksWithMetrics",{...this.$route.params})
-                this.$store
-                    .dispatch(this.$route.query.task ? "flow/loadTaskMetrics" : "flow/loadFlowMetrics", this.loadQuery({
-                        ...this.$route.params,
-                        taskId: this.$route.query.task,
-                    }))
-                    .then(() => {
-                        if (this.metrics.length > 0) {
-                            if (this.$route.query.metric && !this.metrics.includes(this.$route.query.metric)) {
-                                let query = {...this.$route.query};
-                                delete query.metric;
+    const flowMetricFilter = useFlowMetricFilter()
+    const flowStore = useFlowStore()
 
-                                this.$router.push({query: query}).then(_ => this.loadAggregatedMetrics());
-                            } else {
-                                this.loadAggregatedMetrics();
-                            }
-                        }
-                    });
-            },
-            loadAggregatedMetrics() {
-                this.isLoading = true;
+    const isLoading = ref(false)
+    const metricsData = ref<Record<string, any>>({})
 
-                if (this.display) {
-                    this.$store.dispatch(this.$route.query.task ? "flow/loadTaskAggregatedMetrics" : "flow/loadFlowAggregatedMetrics", this.loadQuery({
-                        ...this.$route.params,
-                        ...this.$route.query,
-                        metric: this.$route.query.metric,
-                        aggregate: this.$route.query.aggregation,
-                        taskId: this.$route.query.task
-                    }))
-                } else {
-                    this.$store.commit("flow/setAggregatedMetric", undefined)
-                }
-                this.isLoading = false;
-            },
-            updateQuery(queryParam) {
-                let query = {...this.$route.query};
-                for (const [key, value] of Object.entries(queryParam)) {
-                    if (value === undefined || value === "" || value === null) {
-                        delete query[key]
-                    } else {
-                        query[key] = value;
-                    }
-                }
-
-                this.$router.push({query: query}).then(this.load);
-            },
-            load() {
-                if (!this.$route.query.metric) {
-                    this.loadMetrics();
-                } else {
-                    this.refreshDates = !this.refreshDates;
-                    this.loadAggregatedMetrics();
-                }
-            }
-        }
+    interface MetricAggregation {
+        date: string;
+        value?: number;
     }
+
+    const currentAggregation = computed(() => {
+        return (route.query.aggregation as string) ?? "sum"
+    })
+
+    const currentChartType = computed(() => {
+        return (route.query.chartType as string) ?? "bar"
+    })
+
+    const aggregationOptions = computed(() => [
+        {label: t("sum"), value: "sum"},
+        {label: t("avg"), value: "avg"},
+        {label: t("min"), value: "min"},
+        {label: t("max"), value: "max"},
+    ])
+
+    const chartTypeOptions = computed(() => [
+        {label: t("bar"), value: "bar"},
+        {label: t("line"), value: "line"},
+    ])
+
+    function setAggregation(value: string | number | boolean): void {
+        router.push({query: {...route.query, aggregation: String(value)}})
+    }
+
+    function setChartType(value: string | number | boolean): void {
+        router.push({query: {...route.query, chartType: String(value)}})
+    }
+
+    const selectedMetric = computed(() => {
+        return route.query["filters[metric][EQUALS]"] as string | undefined
+    })
+
+    const selectedTextSearch = computed(() => {
+        return route.query["filters[q][EQUALS]"] as string | undefined
+    })
+
+    const selectedTask = computed(() => {
+        return route.query["filters[task][EQUALS]"] as string | undefined
+    })
+
+    const displayedMetrics = computed(() => {
+        const metrics = (flowStore.metrics ?? []) as string[]
+        if (selectedMetric.value) {
+            return metrics.filter((m) => m === selectedMetric.value)
+        }
+
+        if (selectedTextSearch.value) {
+            return metrics.filter((m) => m.indexOf(selectedTextSearch.value!) !== -1)
+        }
+
+        return metrics
+    })
+
+    function getTimeRangeParams(): {startDate?: string; endDate?: string} {
+        const timeRange = route.query["filters[timeRange][EQUALS]"] as string | undefined
+        if (!timeRange) return {}
+        const endDate = moment().toISOString()
+        const startDate = moment().subtract(moment.duration(timeRange)).toISOString()
+        return {startDate, endDate}
+    }
+
+    function getCategories(metric: string): string[] {
+        const data = metricsData.value[metric]
+        if (!data) return []
+        const aggregations = (data.aggregations ?? []) as MetricAggregation[]
+        return aggregations.map((e) => moment(e.date).format(getFormat(data.groupBy)))
+    }
+
+    function getSeriesData(metric: string): KsChartSeriesItem[] {
+        const data = metricsData.value[metric]
+        if (!data) return []
+        const aggregations = (data.aggregations ?? []) as MetricAggregation[]
+        const aggregationLabel = currentAggregation.value.toLowerCase()
+        return [
+            {
+                name: `${t(aggregationLabel)} ${t("of")} ${metric}`,
+                data: aggregations.map((e) => e.value ?? 0),
+                itemStyle: {color: cssVar("--ks-content-success")},
+            },
+        ]
+    }
+
+    async function loadAllAggregatedMetrics(): Promise<void> {
+        const metrics = displayedMetrics.value
+        if (!metrics.length) {
+            metricsData.value = {}
+            return
+        }
+
+        isLoading.value = true
+
+        const params = route.params as {namespace: string; id: string}
+        const taskId = selectedTask.value
+        const aggregation = currentAggregation.value
+        const timeRangeParams = getTimeRangeParams()
+
+        const newData: Record<string, any> = {}
+
+        await Promise.all(
+            metrics.map(async (metric) => {
+                const options = {
+                    namespace: params.namespace,
+                    id: params.id,
+                    metric,
+                    aggregation,
+                    ...timeRangeParams,
+                }
+                if (taskId) {
+                    newData[metric] = await flowStore.loadTaskAggregatedMetrics({...options, taskId})
+                } else {
+                    newData[metric] = await flowStore.loadFlowAggregatedMetrics(options)
+                }
+            }),
+        )
+
+        metricsData.value = newData
+        isLoading.value = false
+    }
+
+    async function loadMetrics(): Promise<void> {
+        const params = route.params as {namespace: string; id: string}
+
+        flowStore.loadTasksWithMetrics({
+            namespace: params.namespace,
+            id: params.id,
+        })
+
+        const taskId = selectedTask.value
+        let metrics: string[]
+
+        if (taskId) {
+            metrics = await flowStore.loadTaskMetrics({
+                namespace: params.namespace,
+                id: params.id,
+                taskId,
+            })
+        } else {
+            metrics = await flowStore.loadFlowMetrics({
+                namespace: params.namespace,
+                id: params.id,
+            })
+        }
+
+        if (
+            selectedMetric.value &&
+            metrics?.length > 0 &&
+            !metrics.includes(selectedMetric.value)
+        ) {
+            const query = {...route.query}
+            delete query["filters[metric][EQUALS]"]
+            await router.push({query})
+        }
+
+        await loadAllAggregatedMetrics()
+    }
+
+    function load(): void {
+        loadMetrics()
+    }
+
+    watch(
+        () => route.query,
+        (newQuery, oldQuery) => {
+            const taskChanged = newQuery["filters[task][EQUALS]"] !== oldQuery["filters[task][EQUALS]"]
+            const metricChanged = newQuery["filters[metric][EQUALS]"] !== oldQuery["filters[metric][EQUALS]"]
+            const searchChanged = newQuery["filters[q][EQUALS]"] !== oldQuery["filters[q][EQUALS]"]
+            const aggregationChanged = newQuery.aggregation !== oldQuery.aggregation
+            const timeRangeChanged = newQuery["filters[timeRange][EQUALS]"] !== oldQuery["filters[timeRange][EQUALS]"]
+
+            if (taskChanged || metricChanged || searchChanged) {
+                loadMetrics()
+            } else if (aggregationChanged || timeRangeChanged) {
+                loadAllAggregatedMetrics()
+            }
+        },
+    )
+
+    loadMetrics()
 </script>
 
-<style>
-    .navbar-flow-metrics {
+<style scoped lang="scss">
+    .metric-controls {
         display: flex;
-        width: 100%;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .metric-chart-card {
+        margin-bottom: 1rem;
+    }
+
+    .metric-title {
+        font-size: var(--kel-font-size-small);
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        color: var(--ks-content-secondary);
+    }
+
+    .chart {
+        height: 231px;
     }
 </style>

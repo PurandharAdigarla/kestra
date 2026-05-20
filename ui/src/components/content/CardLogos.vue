@@ -6,14 +6,14 @@
                 width="222.67px"
                 height="125px"
                 loading="lazy"
-                :src="$store.getters['doc/resourceUrl']('/docs/tutorial/logos/logo-dark-version.png')"
+                :src="docStore.resourceUrl('/docs/tutorial/logos/logo-dark-version.png')"
                 alt="Dark version logo"
             >
             <p class="title">
-                Dark version
+                {{ $t('dark_version') }}
             </p>
             <p class="description">
-                Use this version when working on a dark background to ensure our name remains readable.
+                {{ $t('use_dark_background') }}
             </p>
         </div>
 
@@ -23,14 +23,14 @@
                 width="222.67px"
                 height="125px"
                 loading="lazy"
-                :src="$store.getters['doc/resourceUrl']('/docs/tutorial/logos/logo-light-version.png')"
+                :src="docStore.resourceUrl('/docs/tutorial/logos/logo-light-version.png')"
                 alt="Light version logo"
             >
             <p class="title">
-                Light version
+                {{ $t('light_version') }}
             </p>
             <p class="description">
-                This is the preferred option when working with a light background.
+                {{ $t('light_background') }}
             </p>
         </div>
 
@@ -40,42 +40,47 @@
                 width="222.67px"
                 height="125px"
                 loading="lazy"
-                :src="$store.getters['doc/resourceUrl']('/docs/tutorial/logos/logo-monogram-version.png')"
+                :src="docStore.resourceUrl('/docs/tutorial/logos/logo-monogram-version.png')"
                 alt="Monogram version logo"
             >
             <p class="title">
-                Monogram
+                {{ $t('monogram') }}
             </p>
             <p class="description">
-                The wordmark colors adapt based on the background, while the icon remains without a background when placed on a dark background.
+                {{ $t('wordmark_colors') }}
             </p>
         </div>
     </div>
 </template>
 
-<style lang="scss" scoped>
-    @import "@kestra-io/ui-libs/src/scss/variables";
+<script setup lang="ts">
+    import {useDocStore} from "../../stores/doc"
+
+    const docStore = useDocStore()
+</script>
+
+<style scoped lang="scss">
 
     .logo-item {
         display: flex;
         flex-direction: column;
-        gap: calc($spacer * 0.5);
+        gap: calc(1rem * 0.5);
 
         p {
             margin: 0;
         }
 
         p.title {
-            font-size: $h6-font-size;
+            font-size: var(--ks-font-size-base);
             font-weight: 600;
             line-height: 28px;
         }
 
         p.description {
-            color: $white-3;
-            font-size: $font-size-base;
+            color: #B9B9BA;
+            font-size: var(--ks-font-size-base);
             font-weight: 400;
-            line-height: 20px;
+            line-height: var(--ks-font-size-lg);
             text-align: left;
         }
     }

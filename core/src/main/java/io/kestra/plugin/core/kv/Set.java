@@ -1,9 +1,12 @@
 package io.kestra.plugin.core.kv;
 
+import java.time.Duration;
+import java.time.Instant;
+
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.kv.KVType;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.tasks.VoidOutput;
@@ -12,6 +15,7 @@ import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.storages.kv.KVMetadata;
 import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -19,14 +23,15 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
-import java.time.Duration;
-import java.time.Instant;
-
 @SuperBuilder(toBuilder = true)
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Create or modify a Key-Value pair."
+    title = "Create or update a key-value entry.",
+    description = """
+        Renders `key`, `value`, and `namespace` (defaults to flow namespace) and writes to the KV store. Supports TTL, description, type coercion (`kvType`), and overwrite control.
+
+        If `kvType` is set, the string value is parsed/validated accordingly (number, boolean, datetime, duration, JSON, etc.)."""
 )
 @Plugin(
     examples = {
@@ -54,68 +59,84 @@ import java.time.Instant;
 public class Set extends Task implements RunnableTask<VoidOutput> {
     @NotNull
     @Schema(
-        title = "The key for which to set the value."
+        title = "The key to set the value for"
     )
-    @PluginProperty(dynamic = true)
-    private String key;
+    private Property<String> key;
+
+    @Schema(
+        title = "The description of the KV pair"
+    )
+    private Property<String> kvDescription;
 
     @NotNull
     @Schema(
-        title = "The value to map to the key."
+        title = "The value to map to the key"
     )
-    @PluginProperty(dynamic = true)
-    private String value;
+    private Property<String> value;
 
     @NotNull
     @Schema(
-        title = "The namespace in which the KV pair will be stored. By default, Kestra will use the namespace of the flow."
+        title = "The namespace in which the KV pair will be stored – by default, Kestra will use the namespace of the flow."
     )
-    @PluginProperty(dynamic = true)
     @Builder.Default
-    private String namespace = "{{ flow.namespace }}";
+    private Property<String> namespace = Property.ofExpression("{{ flow.namespace }}");
 
     @NotNull
     @Schema(
-        title = "Whether to overwrite or fail if a value for the given key already exists."
+        title = "Flag specifying whether to overwrite or fail if a value for the given key already exists."
     )
-    @PluginProperty
     @Builder.Default
-    private boolean overwrite = true;
+    private Property<Boolean> overwrite = Property.ofValue(true);
 
     @Schema(
         title = "Optional Time-To-Live (TTL) duration for the key-value pair. If not set, the KV pair will never be deleted from internal storage."
     )
-    @PluginProperty
-    private Duration ttl;
+    private Property<Duration> ttl;
 
     @Schema(
         title = "Enum representing the data type of the KV pair. If not set, the value will be stored as a string."
     )
-    @PluginProperty
-    private KVType kvType;
+    private Property<KVType> kvType;
 
     @Override
     public VoidOutput run(RunContext runContext) throws Exception {
-        String renderedNamespace = runContext.render(this.namespace);
+        String renderedNamespace = runContext.render(this.namespace).as(String.class).orElse(null);
 
-        String renderedKey = runContext.render(this.key);
-        Object renderedValue = runContext.renderTyped(this.value);
+        String renderedKey = runContext.render(this.key).as(String.class).orElse(null);
+
+        Object renderedValue = runContext.renderTyped(this.value.toString());
 
         KVStore kvStore = runContext.namespaceKv(renderedNamespace);
 
         if (kvType != null) {
+            KVType renderedKvType = runContext.render(kvType).as(KVType.class).orElseThrow();
             if (renderedValue instanceof String renderedValueStr) {
-                renderedValue = switch (kvType) {
+                renderedValue = switch (renderedKvType) {
                     case NUMBER -> JacksonMapper.ofJson().readValue(renderedValueStr, Number.class);
                     case BOOLEAN -> Boolean.parseBoolean((String) renderedValue);
                     case DATETIME, DATE -> Instant.parse(renderedValueStr);
-                    case DURATION -> Duration.parse(renderedValueStr);
+                    // We parse duration to make sure it's valid but we store it as a raw duration string
+                    case DURATION -> {
+                        Duration.parse(renderedValueStr);
+                        yield renderedValueStr;
+                    }
                     case JSON -> JacksonMapper.toObject(renderedValueStr);
                     default -> renderedValue;
                 };
+            } else if (renderedValue instanceof Number valueNumber && renderedKvType == KVType.STRING) {
+                renderedValue = valueNumber.toString();
             }
         }
-        kvStore.put(renderedKey, new KVValueAndMetadata(new KVMetadata(ttl), renderedValue), this.overwrite);
+
+        kvStore.put(
+            renderedKey, new KVValueAndMetadata(
+                new KVMetadata(
+                    runContext.render(kvDescription).as(String.class).orElse(null),
+                    runContext.render(ttl).as(Duration.class).orElse(null)
+                ), renderedValue
+            ),
+            runContext.render(this.overwrite).as(Boolean.class).orElseThrow()
+        );
 
         return null;
     }

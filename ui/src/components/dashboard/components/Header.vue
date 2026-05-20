@@ -1,63 +1,69 @@
 <template>
-    <TopNavBar :title="routeInfo.title" :breadcrumb="props.breadcrumb">
-        <template #additional-right v-if="canCreate">
-            <ul>
-                <li v-if="props.id">
-                    <router-link
-                        :to="{
-                            name: 'dashboards/update',
-                            params: {id: props.id},
-                        }"
-                    >
-                        <el-button :icon="Pencil">
-                            {{ $t("edit_custom_dashboard") }}
-                        </el-button>
-                    </router-link>
-                </li>
-                <li>
-                    <router-link
+    <TopNavBar
+        :title="routeInfo.title"
+        :description="props.dashboard?.description"
+    >
+        <template v-if="isAllowedDashboard || isAllowedFlow" #actions>
+            <NavBarActions>
+                <Dashboards
+                    v-if="ALLOWED_CREATION_ROUTES.includes(String(route.name)) && isAllowedDashboard"
+                    @dashboard="(value: any) => props.load?.(value)"
+                />
+                <NavBarAction
+                    v-if="props.dashboard?.id && props.dashboard?.id !== 'default' && isAllowedDashboard"
+                    :icon="Pencil"
+                    :label="$t('dashboards.edition.label')"
+                    :to="{name: 'dashboards/update', params: {dashboard: props.dashboard.id}}"
+                />
+
+                <template #primary>
+                    <NavBarAction
+                        v-if="isAllowedFlow"
+                        type="primary"
+                        :icon="Plus"
+                        :label="$t('create_flow')"
                         :to="{name: 'flows/create'}"
-                        data-test-id="dashboard-create-button"
-                    >
-                        <el-button :icon="Plus" type="primary">
-                            {{ $t("create_flow") }}
-                        </el-button>
-                    </router-link>
-                </li>
-            </ul>
+                    />
+                </template>
+            </NavBarActions>
         </template>
     </TopNavBar>
 </template>
 
-<script setup>
-    import {computed} from "vue";
+<script setup lang="ts">
+    import {computed} from "vue"
+    import {useRoute} from "vue-router"
+    import {useI18n} from "vue-i18n"
+    import {useAuthStore} from "override/stores/auth"
 
-    import {useStore} from "vuex";
-    import {useI18n} from "vue-i18n";
+    const {t} = useI18n()
+    const route = useRoute()
+    const authStore = useAuthStore()
 
-    import permission from "../../../models/permission";
-    import action from "../../../models/action";
+    import TopNavBar from "../../layout/TopNavBar.vue"
+    import Dashboards from "./selector/Selector.vue"
 
-    import TopNavBar from "../../layout/TopNavBar.vue";
+    import NavBarActions from "../../layout/NavBarActions.vue"
+    import NavBarAction from "../../layout/NavBarAction.vue"
 
-    import Pencil from "vue-material-design-icons/Pencil.vue";
-    import Plus from "vue-material-design-icons/Plus.vue";
+    import Pencil from "vue-material-design-icons/Pencil.vue"
+    import Plus from "vue-material-design-icons/Plus.vue"
 
-    const store = useStore();
-    const {t} = useI18n({useScope: "global"});
+    import resource from "../../../models/resource"
+    import action from "../../../models/action"
+    import {ALLOWED_CREATION_ROUTES} from "../composables/useDashboards"
 
     const props = defineProps({
-        title: {type: String, default: undefined},
-        breadcrumb: {type: Array, default: () => []},
-        id: {type: String, default: undefined},
-    });
+        dashboard: {type: Object, default: undefined},
+        load: {type: Function, default: undefined},
+    })
 
-    const user = computed(() => store.state.auth.user);
-    const canCreate = computed(() =>
-        user.value.isAllowedGlobal(permission.FLOW, action.CREATE),
-    );
+    const isAllowedFlow = computed(() => authStore.user?.isAllowed(resource.FLOW, action.CREATE, "*"))
 
-    const routeInfo = computed(() => ({
-        title: props.title ?? t("homeDashboard.title"),
-    }));
+    const isAllowedDashboard = computed(() => authStore.user?.isAllowed(resource.DASHBOARD, action.CREATE, "*"))
+
+    const routeInfo = computed(() => ({title: props.dashboard?.title ?? t("overview")}))
+
+    import useRouteContext from "../../../composables/useRouteContext"
+    useRouteContext(routeInfo)
 </script>

@@ -1,36 +1,37 @@
 <template>
-    <div data-component="FILENAME_PLACEHOLDER" v-if="name" id="environment">
+    <div v-if="name" id="environment">
         <strong>{{ name }}</strong>
     </div>
 </template>
 
-<script>
-    import {mapGetters} from "vuex";
-    import {cssVariable} from "@kestra-io/ui-libs/src/utils/global";
+<script setup lang="ts">
+    import {cssVar} from "@kestra-io/design-system"
+    import {useLayoutStore} from "../../stores/layout"
+    import {useMiscStore} from "override/stores/misc"
+    import {computed} from "vue"
 
-    export default {
-        computed: {
-            ...mapGetters("layout", ["envName", "envColor"]),
-            ...mapGetters("misc", ["configs"]),
-            name() {
-                return this.envName || this.configs?.environment?.name;
-            },
-            color() {
-                if (this.envColor) {
-                    return this.envColor;
-                }
+    const layoutStore = useLayoutStore()
+    const miscStore = useMiscStore()
 
-                if (this.configs?.environment?.color) {
-                    return this.configs.environment.color;
-                }
+    const name = computed(() => {
+        return layoutStore.envName || miscStore.configs?.environment?.name
+    })
 
-                return cssVariable("--bs-info");
-            }
+    const color = computed(() => {
+        if (layoutStore.envColor) {
+            return layoutStore.envColor
         }
-    }
+
+        if (miscStore.configs?.environment?.color) {
+            return miscStore.configs.environment.color
+        }
+
+        return cssVar("--ks-content-info")
+    })
+
 </script>
 
-<style lang="scss" scoped>
+<style scoped lang="scss">
 #environment {
     margin-bottom: 1.5rem;
     text-align: center;
@@ -38,10 +39,10 @@
 
     strong {
         border: 1px solid v-bind('color');
-        border-radius: var(--bs-border-radius);
-        color: var(--bs-body-color);
+        border-radius: var(--kel-border-radius-base);
+        color: var(--ks-content-primary);
         padding: 0.125rem 0.25rem;
-        font-size: var(--font-size-sm);
+        font-size: var(--ks-font-size-sm);
         white-space: nowrap;
         text-overflow: ellipsis;
         overflow: hidden;

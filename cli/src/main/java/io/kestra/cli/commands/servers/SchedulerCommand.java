@@ -1,25 +1,32 @@
 package io.kestra.cli.commands.servers;
 
+import java.util.Map;
+import java.util.Optional;
+
 import com.google.common.collect.ImmutableMap;
-import io.kestra.core.contexts.KestraContext;
+
 import io.kestra.core.models.ServerType;
-import io.kestra.core.schedulers.AbstractScheduler;
-import io.kestra.core.utils.Await;
+import io.kestra.core.runners.Scheduler;
+import org.awaitility.Awaitility;
+
 import io.micronaut.context.ApplicationContext;
 import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine;
-
-import java.util.Map;
+import io.kestra.core.utils.Await;
 
 @CommandLine.Command(
     name = "scheduler",
-    description = "start an scheduler"
+    description = "Start the Kestra scheduler"
 )
 @Slf4j
 public class SchedulerCommand extends AbstractServerCommand {
     @Inject
-    private ApplicationContext applicationContext;
+    private Provider<Scheduler> scheduler;
+
+    @CommandLine.Option(names = { "-t", "--max-threads" }, description = "The maximum number of threads used by the scheduler for evaluating triggers.")
+    private Integer maxThread;
 
     @SuppressWarnings("unused")
     public static Map<String, Object> propertiesOverrides() {
@@ -31,13 +38,10 @@ public class SchedulerCommand extends AbstractServerCommand {
     @Override
     public Integer call() throws Exception {
         super.call();
-        this.shutdownHook(() -> KestraContext.getContext().shutdown());
 
-        AbstractScheduler scheduler = applicationContext.getBean(AbstractScheduler.class);
-        scheduler.run();
+        scheduler.get().start(Optional.ofNullable(this.maxThread).orElse(Scheduler.defaultMaxNumThreads()));
 
-        log.info("Scheduler started");
-        Await.until(() -> !this.applicationContext.isRunning());
+        Await.await().forever().until(() -> !this.applicationContext.isRunning());
 
         return 0;
     }
